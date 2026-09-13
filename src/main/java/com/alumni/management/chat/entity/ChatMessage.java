@@ -44,8 +44,10 @@ public class ChatMessage {
 
 	private MessageStatus status = MessageStatus.SENT;
 
+	@com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSS")
 	private LocalDateTime timestamp = LocalDateTime.now();
 
+	@com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSS")
 	private LocalDateTime updatedAt;
 
 	@JsonProperty("isRead")

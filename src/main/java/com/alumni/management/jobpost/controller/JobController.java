@@ -30,9 +30,14 @@ public class JobController {
 	
 	
 	@GetMapping()
- public List<JobDto> getAllJobs(){
-	 return jobService.getAllJobs();
- }
+	public List<JobDto> getAllJobs() {
+		return jobService.getAllJobs();
+	}
+
+	@GetMapping("/my")
+	public List<JobDto> getMyJobs() {
+		return jobService.getMyJobs();
+	}
 	
 	@PutMapping("/{id}")
 	public String updateJob(@PathVariable Long id, @RequestBody JobDto jobDto) {

@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
@@ -90,15 +91,88 @@ public class JobService {
 	 * (cancel) all database changes made during this process to maintain data
 	 * integrity.
 	 */
+	private void validateJob(String title, String company, String location, String salary,
+			String description, String skills, String experience, String joiningType,
+			String jobType, java.time.LocalDate lastDate, String link, String email) {
+
+		if (title == null || title.trim().isEmpty()) {
+			throw new IllegalArgumentException("Job title is required.");
+		}
+		if (company == null || company.trim().isEmpty()) {
+			throw new IllegalArgumentException("Company name is required.");
+		}
+		if (location == null || location.trim().isEmpty()) {
+			throw new IllegalArgumentException("Job location is required.");
+		}
+		if (salary == null || salary.trim().isEmpty()) {
+			throw new IllegalArgumentException("Annual salary in LPA is required.");
+		}
+		try {
+			String clean = salary.trim().replaceAll("(?i)lpa", "").replaceAll("₹", "").trim();
+			double num = Double.parseDouble(clean);
+			if (num <= 0 || num > 200) {
+				throw new IllegalArgumentException("Salary must be a positive annual package in LPA between 0.1 and 200.");
+			}
+		} catch (NumberFormatException e) {
+			throw new IllegalArgumentException("Please enter a valid numeric salary in LPA (e.g. 3.5, 6, 12).");
+		}
+		if (description == null || description.trim().isEmpty()) {
+			throw new IllegalArgumentException("Job description is required.");
+		}
+		if (skills == null || skills.trim().isEmpty()) {
+			throw new IllegalArgumentException("Skills required must not be empty.");
+		}
+		if (experience == null || experience.trim().isEmpty()) {
+			throw new IllegalArgumentException("Experience required must not be empty.");
+		}
+		if (joiningType == null || joiningType.trim().isEmpty()) {
+			throw new IllegalArgumentException("Joining type is required.");
+		}
+		if (jobType == null || jobType.trim().isEmpty()) {
+			throw new IllegalArgumentException("Job type is required.");
+		}
+		if (lastDate == null) {
+			throw new IllegalArgumentException("Application deadline is required.");
+		}
+		if (link == null || link.trim().isEmpty()) {
+			throw new IllegalArgumentException("Company website / application link is required.");
+		}
+		if (email == null || email.trim().isEmpty() || !email.contains("@")) {
+			throw new IllegalArgumentException("A valid company contact email is required.");
+		}
+	}
+
+	private String normalizeLpaString(String rawSalary) {
+		if (rawSalary == null || rawSalary.trim().isEmpty()) {
+			return "";
+		}
+		String clean = rawSalary.trim();
+		if (clean.toLowerCase().endsWith("lpa")) {
+			return clean;
+		}
+		try {
+			double num = Double.parseDouble(clean.replaceAll("₹", "").trim());
+			String formattedNum = (num % 1 == 0) ? String.valueOf((int) num) : String.valueOf(num);
+			return formattedNum + " LPA";
+		} catch (Exception e) {
+			return clean + " LPA";
+		}
+	}
+
 	@Transactional
 	public String createJobpost(Job job) {
 		User user = getCurrUser();
-		// Check if user has permission to post jobs (Alumni, Faculty, or Admin)
 		String userRole = user.getRole().getRoleName();
 		if (!"ALUMNI".equals(userRole) && !"FACULTY".equals(userRole) && !"ADMIN".equals(userRole)) {
 			throw new RuntimeException("Only alumni, faculty, and admin can create job posts");
 		}
-//Set the user to the job post
+
+		validateJob(job.getJobTitle(), job.getCompanyName(), job.getLocation(), job.getSalary(),
+				job.getJobDescription(), job.getSkillsRequired(), job.getExperienceRequired(),
+				job.getJoiningType(), job.getJobType(), job.getLastDateToApply(),
+				job.getCompanyLink(), job.getCompanyEmail());
+
+		job.setSalary(normalizeLpaString(job.getSalary()));
 		job.setUser(user);
 		jobRepository.save(job);
 
@@ -117,8 +191,17 @@ public class JobService {
 	}
 
 	public List<JobDto> getAllJobs() {
-		List<Job> jobs = jobRepository.findAll();
+		List<Job> jobs = jobRepository.findAll(Sort.by(Sort.Direction.DESC, "id"));
 		return jobs.stream().map(this::convertToDto).collect(Collectors.toList());
+	}
+
+	public List<JobDto> getMyJobs() {
+		User currentUser = getCurrUser();
+		List<Job> jobs = jobRepository.findByUserId(currentUser.getId());
+		return jobs.stream()
+				.sorted((a, b) -> b.getId().compareTo(a.getId()))
+				.map(this::convertToDto)
+				.collect(Collectors.toList());
 	}
 
 	@Transactional
@@ -128,17 +211,20 @@ public class JobService {
 		Job existingJob = jobRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Job not found with id: " + id));
 
-		// Check if current user is the owner of the job or admin
 		String userRole = currentUser.getRole().getRoleName();
 		if (!existingJob.getUser().getId().equals(currentUser.getId()) && !"ADMIN".equals(userRole)) {
 			throw new RuntimeException("You are not authorized to update this job post");
 		}
 
-		// Update job details
+		validateJob(jobDto.getJobTitle(), jobDto.getCompanyName(), jobDto.getLocation(), jobDto.getSalary(),
+				jobDto.getJobDescription(), jobDto.getSkillsRequired(), jobDto.getExperienceRequired(),
+				jobDto.getJoiningType(), jobDto.getJobType(), jobDto.getLastDateToApply(),
+				jobDto.getCompanyLink(), jobDto.getCompanyEmail());
+
 		existingJob.setCompanyName(jobDto.getCompanyName());
 		existingJob.setJobTitle(jobDto.getJobTitle());
 		existingJob.setLocation(jobDto.getLocation());
-		existingJob.setSalary(jobDto.getSalary());
+		existingJob.setSalary(normalizeLpaString(jobDto.getSalary()));
 		existingJob.setJobDescription(jobDto.getJobDescription());
 		existingJob.setSkillsRequired(jobDto.getSkillsRequired());
 		existingJob.setExperienceRequired(jobDto.getExperienceRequired());

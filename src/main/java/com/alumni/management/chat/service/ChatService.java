@@ -42,6 +42,9 @@ public class ChatService {
     @Autowired
     private SimpMessagingTemplate messagingTemplate;
 
+    @Autowired(required = false)
+    private com.alumni.management.user.repository.UserRepository userRepository;
+
     public ChatMessage processAndSendMessage(String authenticatedSender, ChatSendRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("Chat request payload must not be null.");
@@ -59,6 +62,21 @@ public class ChatService {
         if (sender.equalsIgnoreCase(receiver)) {
             log.error("❌ CHAT ERROR: Sender ({}) is same as receiver ({})!", sender, receiver);
             throw new IllegalArgumentException("Cannot send message to yourself.");
+        }
+
+        // Strictly forbid ADMIN participation in user chat
+        if (userRepository != null) {
+            com.alumni.management.user.entity.User senderUser = userRepository.findByEmail(sender).orElse(null);
+            if (senderUser != null && senderUser.getRole() != null && "ADMIN".equalsIgnoreCase(senderUser.getRole().getRoleName())) {
+                log.warn("⛔ ADMIN CHAT FORBIDDEN: Admin ({}) attempted to send a chat message!", sender);
+                throw new IllegalArgumentException("Admin accounts are not permitted to participate in user chat.");
+            }
+
+            com.alumni.management.user.entity.User receiverUser = userRepository.findByEmail(receiver).orElse(null);
+            if (receiverUser != null && receiverUser.getRole() != null && "ADMIN".equalsIgnoreCase(receiverUser.getRole().getRoleName())) {
+                log.warn("⛔ ADMIN CHAT FORBIDDEN: User ({}) attempted to message Admin ({})!", sender, receiver);
+                throw new IllegalArgumentException("Cannot message an Admin account.");
+            }
         }
 
         if (request.getContent() == null || request.getContent().trim().isEmpty()) {
@@ -87,8 +105,24 @@ public class ChatService {
             }
         }
         chatMessage.setType(messageType);
-        chatMessage.setTimestamp(LocalDateTime.now());
-        chatMessage.setUpdatedAt(LocalDateTime.now());
+        
+        LocalDateTime messageTime = LocalDateTime.now();
+        if (request.getTimestamp() != null && !request.getTimestamp().trim().isEmpty()) {
+            try {
+                String tsStr = request.getTimestamp().trim();
+                if (tsStr.endsWith("Z") || tsStr.contains("+")) {
+                    java.time.Instant instant = java.time.Instant.parse(tsStr);
+                    messageTime = LocalDateTime.ofInstant(instant, java.time.ZoneId.systemDefault());
+                } else {
+                    messageTime = LocalDateTime.parse(tsStr);
+                }
+            } catch (Exception ex) {
+                log.warn("Could not parse client timestamp: {}, falling back to server time", request.getTimestamp());
+                messageTime = LocalDateTime.now();
+            }
+        }
+        chatMessage.setTimestamp(messageTime);
+        chatMessage.setUpdatedAt(messageTime);
 
         // Check if receiver is online to immediately set status to DELIVERED
         boolean receiverOnline = PresenceEventListener.isUserOnline(receiver);
@@ -130,7 +164,8 @@ public class ChatService {
         ChatSendRequest request = new ChatSendRequest(
                 chatMessage.getReceiver(),
                 chatMessage.getContent(),
-                chatMessage.getType() != null ? chatMessage.getType().name() : null
+                chatMessage.getType() != null ? chatMessage.getType().name() : null,
+                chatMessage.getTimestamp() != null ? chatMessage.getTimestamp().toString() : null
         );
         return processAndSendMessage(authenticatedSender, request);
     }
@@ -165,6 +200,18 @@ public class ChatService {
     public List<ChatMessage> getChatHistory(String myEmail, String targetEmail) {
         String user1 = myEmail != null ? myEmail.trim().toLowerCase() : "";
         String user2 = targetEmail != null ? targetEmail.trim().toLowerCase() : "";
+
+        if (userRepository != null) {
+            com.alumni.management.user.entity.User u1 = userRepository.findByEmail(user1).orElse(null);
+            if (u1 != null && u1.getRole() != null && "ADMIN".equalsIgnoreCase(u1.getRole().getRoleName())) {
+                return Collections.emptyList();
+            }
+            com.alumni.management.user.entity.User u2 = userRepository.findByEmail(user2).orElse(null);
+            if (u2 != null && u2.getRole() != null && "ADMIN".equalsIgnoreCase(u2.getRole().getRoleName())) {
+                return Collections.emptyList();
+            }
+        }
+
         String conversationId = Conversation.generateConversationId(user1, user2);
 
         // Mark unread messages sent by target to me as READ
