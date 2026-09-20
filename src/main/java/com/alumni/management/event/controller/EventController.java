@@ -39,6 +39,18 @@ public class EventController {
 		return eventService.createEvent(title, description, location, eventDate, targetDepartment, note, image);
 	}
 
+	@PutMapping(value = "/{id}", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+	public String updateEvent(@PathVariable Long id,
+			@RequestParam("title") String title,
+			@RequestParam("description") String description,
+			@RequestParam("location") String location,
+			@RequestParam("eventDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate eventDate,
+			@RequestParam("targetDepartment") String targetDepartment,
+			@RequestParam(value = "note", required = false) String note,
+			@RequestParam(value = "image", required = false) MultipartFile image) {
+		return eventService.updateEvent(id, title, description, location, eventDate, targetDepartment, note, image);
+	}
+
 	//	@PostMapping()
 	//	public String createEvent(@RequestBody Event event) {
 	//		return eventService.createEvent(event);

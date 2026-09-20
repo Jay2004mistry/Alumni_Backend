@@ -160,5 +160,44 @@ public class EventService {
 		return "Event deleted successfully";
 	}
 
+	public String updateEvent(Long id, String title, String description, String location, LocalDate eventDate,
+			String targetDepartment, String note, MultipartFile image) {
+		User currentUser = getCurrentUser();
+		Event existingEvent = eventRepository.findById(id)
+				.orElseThrow(() -> new ResourceNotFoundException("Event not found with id " + id));
+
+		String userRole = currentUser.getRole().getRoleName();
+		if (existingEvent.getCreatedBy() == null ||
+				(!existingEvent.getCreatedBy().getId().equals(currentUser.getId()) && !"ADMIN".equals(userRole))) {
+			throw new RuntimeException("You are not authorized to update this event");
+		}
+
+		existingEvent.setTitle(title);
+		existingEvent.setDescription(description);
+		existingEvent.setLocation(location);
+		existingEvent.setEventDate(eventDate);
+		existingEvent.setTargetDepartment(targetDepartment);
+		existingEvent.setNote(note);
+
+		if (image != null && !image.isEmpty()) {
+			try {
+				String uploadDir = "uploads/events/";
+				File directory = new File(uploadDir);
+				if (!directory.exists()) {
+					directory.mkdirs();
+				}
+				String fileName = System.currentTimeMillis() + "_" + image.getOriginalFilename();
+				File destFile = new File(directory.getAbsolutePath() + File.separator + fileName);
+				image.transferTo(destFile);
+				existingEvent.setImageUrl("/uploads/events/" + fileName);
+			} catch (IOException e) {
+				throw new RuntimeException("Failed to upload image", e);
+			}
+		}
+
+		eventRepository.save(existingEvent);
+		return "Event updated successfully";
+	}
+
 }
 

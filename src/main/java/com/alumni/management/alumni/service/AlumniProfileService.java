@@ -59,7 +59,7 @@ public class AlumniProfileService {
 		alumniProfile.setDesignation(profile.getDesignation());
 		alumniProfile.setCompanyName(profile.getCompanyName());
 		alumniProfile.setIndustry(profile.getIndustry());
-		alumniProfile.setSkills(profile.getSkills().toLowerCase().trim());
+		alumniProfile.setSkills(profile.getSkills() != null ? profile.getSkills().toLowerCase().trim() : "");
 		alumniProfile.setWorkExperience(profile.getWorkExperience());
 
 		alumniProfile.setLinkedInUrl(profile.getLinkedInUrl());
