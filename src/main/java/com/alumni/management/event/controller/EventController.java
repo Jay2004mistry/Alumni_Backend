@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,6 +22,7 @@ import com.alumni.management.event.service.EventService;
 
 @RestController
 @RequestMapping("api/events")
+@CrossOrigin
 public class EventController {
 
 	@Autowired
@@ -39,7 +41,10 @@ public class EventController {
 		return eventService.createEvent(title, description, location, eventDate, targetDepartment, note, image);
 	}
 
-	@PutMapping(value = "/{id}", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+	@org.springframework.web.bind.annotation.RequestMapping(value = "/{id}", method = {
+			org.springframework.web.bind.annotation.RequestMethod.PUT,
+			org.springframework.web.bind.annotation.RequestMethod.POST }, consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+	@PreAuthorize("hasAnyRole('ALUMNI', 'FACULTY', 'ADMIN')")
 	public String updateEvent(@PathVariable Long id,
 			@RequestParam("title") String title,
 			@RequestParam("description") String description,

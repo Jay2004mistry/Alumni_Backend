@@ -166,7 +166,9 @@ public class EventService {
 		Event existingEvent = eventRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Event not found with id " + id));
 
-		if (existingEvent.getCreatedBy() == null || !existingEvent.getCreatedBy().getId().equals(currentUser.getId())) {
+		boolean isOwner = existingEvent.getCreatedBy() != null && existingEvent.getCreatedBy().getId().equals(currentUser.getId());
+		boolean isAdmin = currentUser.getRole() != null && "ADMIN".equalsIgnoreCase(currentUser.getRole().getRoleName());
+		if (!isOwner && !isAdmin) {
 			throw new RuntimeException("You are not authorized to update this event");
 		}
 
