@@ -1,5 +1,6 @@
 package com.alumni.management.admin.service;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -7,13 +8,21 @@ import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import com.alumni.management.admin.dto.AdminStatsDto;
 import com.alumni.management.admin.dto.CreateUserRequestDto;
 import com.alumni.management.alumni.entity.AlumniProfile;
 import com.alumni.management.alumni.repository.AlumniProfileRepository;
+import com.alumni.management.event.entity.Event;
+import com.alumni.management.event.repository.EventRepository;
 import com.alumni.management.exception.ResourceNotFoundException;
 import com.alumni.management.faculty.entity.FacultyProfile;
 import com.alumni.management.faculty.repository.FacultyRepository;
+import com.alumni.management.jobpost.entity.Job;
+import com.alumni.management.jobpost.repository.JobRepository;
+import com.alumni.management.post.entity.Post;
+import com.alumni.management.post.repository.PostRepository;
 import com.alumni.management.role.entity.Role;
 import com.alumni.management.role.repository.RoleRepository;
 import com.alumni.management.user.dto.UserResponseDto;
@@ -37,6 +46,15 @@ public class AdminService {
 
 	@Autowired(required = false)
 	private FacultyRepository facultyRepository;
+
+	@Autowired(required = false)
+	private JobRepository jobRepository;
+
+	@Autowired(required = false)
+	private EventRepository eventRepository;
+
+	@Autowired(required = false)
+	private PostRepository postRepository;
 
 	private String getUserDepartment(User user) {
 		String role = user.getRole() != null ? user.getRole().getRoleName().toUpperCase() : "";
@@ -79,9 +97,90 @@ public class AdminService {
 		)).collect(Collectors.toList());
 	}
 
+	public AdminStatsDto getAdminStats() {
+		List<User> allUsers = userRepository.findAll();
+		long totalUsers = allUsers.size();
+		long totalAlumni = allUsers.stream().filter(u -> u.getRole() != null && "ALUMNI".equalsIgnoreCase(u.getRole().getRoleName())).count();
+		long totalFaculty = allUsers.stream().filter(u -> u.getRole() != null && "FACULTY".equalsIgnoreCase(u.getRole().getRoleName())).count();
+		long totalStudents = allUsers.stream().filter(u -> u.getRole() != null && "STUDENT".equalsIgnoreCase(u.getRole().getRoleName())).count();
+
+		long totalJobs = 0;
+		long activeJobs = 0;
+		if (jobRepository != null) {
+			List<Job> jobs = jobRepository.findAll();
+			totalJobs = jobs.size();
+			LocalDate today = LocalDate.now();
+			activeJobs = jobs.stream().filter(job -> {
+				if (job.getLastDateToApply() == null) {
+					return true;
+				}
+				return !job.getLastDateToApply().isBefore(today);
+			}).count();
+		}
+
+		long totalEvents = 0;
+		long activeEvents = 0;
+		if (eventRepository != null) {
+			List<Event> events = eventRepository.findAll();
+			totalEvents = events.size();
+			LocalDate today = LocalDate.now();
+			activeEvents = events.stream().filter(evt -> {
+				if (evt.getEventDate() == null) return true;
+				return !evt.getEventDate().isBefore(today);
+			}).count();
+		}
+
+		return new AdminStatsDto(
+				totalUsers,
+				totalAlumni,
+				totalFaculty,
+				totalStudents,
+				totalJobs,
+				activeJobs,
+				totalEvents,
+				activeEvents
+		);
+	}
+
+	@Transactional
 	public String deleteUser(Long userId) {
 		User user = userRepository.findById(userId)
 				.orElseThrow(() -> new ResourceNotFoundException("User not found with id " + userId));
+
+		// Clean up profile associated strictly with this specific user
+		if (alumniProfileRepository != null) {
+			Optional<AlumniProfile> ap = alumniProfileRepository.findByUserId(userId);
+			ap.ifPresent(alumniProfileRepository::delete);
+		}
+		if (facultyRepository != null) {
+			Optional<FacultyProfile> fp = facultyRepository.findByUserId(userId);
+			fp.ifPresent(facultyRepository::delete);
+		}
+
+		// Clean up posts created strictly by this user
+		if (postRepository != null) {
+			List<Post> userPosts = postRepository.findByUserIdOrderByCreatedAtDesc(userId);
+			if (userPosts != null && !userPosts.isEmpty()) {
+				postRepository.deleteAll(userPosts);
+			}
+		}
+
+		// Clean up jobs created strictly by this user
+		if (jobRepository != null) {
+			List<Job> userJobs = jobRepository.findByUserId(userId);
+			if (userJobs != null && !userJobs.isEmpty()) {
+				jobRepository.deleteAll(userJobs);
+			}
+		}
+
+		// Clean up events created strictly by this user
+		if (eventRepository != null) {
+			List<Event> userEvents = eventRepository.findByCreatedBy_Id(userId);
+			if (userEvents != null && !userEvents.isEmpty()) {
+				eventRepository.deleteAll(userEvents);
+			}
+		}
+
 		userRepository.delete(user);
 		return "User deleted successfully";
 	}
