@@ -128,9 +128,8 @@ public class JobService {
 		Job existingJob = jobRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Job not found with id: " + id));
 
-		// Check if current user is the owner of the job or admin
-		String userRole = currentUser.getRole().getRoleName();
-		if (!existingJob.getUser().getId().equals(currentUser.getId()) && !"ADMIN".equals(userRole)) {
+		// Check if current user is the owner of the job
+		if (existingJob.getUser() == null || !existingJob.getUser().getId().equals(currentUser.getId())) {
 			throw new RuntimeException("You are not authorized to update this job post");
 		}
 
