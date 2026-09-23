@@ -31,8 +31,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                     // Public endpoints
                     .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
-                    .requestMatchers("/chat/**", "/api/chat/**").permitAll()
-                    .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/chat/**").permitAll()
+                    .requestMatchers("/error").permitAll()
+                    .requestMatchers("/chat/**").permitAll()
+                    .requestMatchers("/api/chat/**").authenticated()
                     .requestMatchers("/api/users/login").permitAll()
                     .requestMatchers("/api/users/forgot-password").permitAll()
                     .requestMatchers("/api/users/reset-password").permitAll()

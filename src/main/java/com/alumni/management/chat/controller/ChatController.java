@@ -1,19 +1,16 @@
 package com.alumni.management.chat.controller;
 
+import java.security.Principal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,144 +19,93 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.alumni.management.chat.config.PresenceEventListener;
+import com.alumni.management.chat.dto.ChatSendRequest;
+import com.alumni.management.chat.dto.TypingEvent;
 import com.alumni.management.chat.entity.ChatMessage;
-import com.alumni.management.chat.repository.ChatMessageRepository;
-
-import org.springframework.web.bind.annotation.CrossOrigin;
+import com.alumni.management.chat.service.ChatService;
 
 @RestController
 @RequestMapping("/api/chat")
-@CrossOrigin(origins = "*", allowedHeaders = "*")
 public class ChatController {
 
-	@Autowired
-	private SimpMessagingTemplate messagingTemplate;
+	private static final Logger log = LoggerFactory.getLogger(ChatController.class);
 
 	@Autowired
-	private ChatMessageRepository chatMessageRepository;
+	private ChatService chatService;
 
-	private String getCurrentUserEmail() {
-		String auth = SecurityContextHolder.getContext().getAuthentication().getName();
-		return auth != null ? auth.trim().toLowerCase() : "";
+	private String getCurrentUserEmail(Principal principal) {
+		if (principal != null && principal.getName() != null && !principal.getName().trim().isEmpty()) {
+			return principal.getName().trim().toLowerCase();
+		}
+		String auth = SecurityContextHolder.getContext().getAuthentication() != null
+				? SecurityContextHolder.getContext().getAuthentication().getName()
+				: null;
+		return (auth != null && !auth.equalsIgnoreCase("anonymousUser")) ? auth.trim().toLowerCase() : "";
 	}
 
 	@MessageMapping("/chat.send")
-	public void sendMessage(@Payload ChatMessage chatMessage) {
-		chatMessage.setTimestamp(LocalDateTime.now());
-		chatMessage.setRead(false);
-		
-		String sender = (chatMessage.getSender() != null && !chatMessage.getSender().trim().isEmpty())
-				? chatMessage.getSender().trim().toLowerCase()
-				: getCurrentUserEmail();
-		String receiver = chatMessage.getReceiver() != null ? chatMessage.getReceiver().trim().toLowerCase() : "";
+	public void sendMessage(Principal principal, @Payload ChatSendRequest request) {
+		String authEmail = getCurrentUserEmail(principal);
+		log.info("📥 BACKEND CHAT RECEIVED: authenticatedUser={}, receiver={}, content={}",
+				authEmail,
+				request != null ? request.getReceiver() : null,
+				request != null ? request.getContent() : null);
+		chatService.processAndSendMessage(authEmail, request);
+	}
 
-		chatMessage.setSender(sender);
-		chatMessage.setReceiver(receiver);
-
-		ChatMessage saved = chatMessageRepository.save(chatMessage);
-
-		try {
-			messagingTemplate.convertAndSendToUser(receiver, "/queue/messages", saved);
-			messagingTemplate.convertAndSendToUser(sender, "/queue/messages", saved);
-		} catch (Exception e) {
-			// Log WebSocket error silently
-		}
+	@MessageMapping("/chat.typing")
+	public void handleTyping(Principal principal, @Payload TypingEvent event) {
+		String authEmail = getCurrentUserEmail(principal);
+		chatService.processTyping(authEmail, event);
 	}
 
 	@PostMapping("/send")
-	public ChatMessage sendRestMessage(@RequestBody ChatMessage chatMessage) {
-		chatMessage.setTimestamp(LocalDateTime.now());
-		chatMessage.setRead(false);
-
-		String sender = (chatMessage.getSender() != null && !chatMessage.getSender().trim().isEmpty())
-				? chatMessage.getSender().trim().toLowerCase()
-				: getCurrentUserEmail();
-		String receiver = chatMessage.getReceiver() != null ? chatMessage.getReceiver().trim().toLowerCase() : "";
-
-		chatMessage.setSender(sender);
-		chatMessage.setReceiver(receiver);
-
-		ChatMessage saved = chatMessageRepository.save(chatMessage);
-
-		try {
-			messagingTemplate.convertAndSendToUser(receiver, "/queue/messages", saved);
-			messagingTemplate.convertAndSendToUser(sender, "/queue/messages", saved);
-		} catch (Exception e) {
-			// Log WebSocket error silently
-		}
-
-		return saved;
+	public ChatMessage sendRestMessage(Principal principal, @RequestBody ChatSendRequest request) {
+		String authEmail = getCurrentUserEmail(principal);
+		log.info("📥 REST CHAT RECEIVED: authenticatedUser={}, receiver={}, content={}",
+				authEmail,
+				request != null ? request.getReceiver() : null,
+				request != null ? request.getContent() : null);
+		return chatService.processAndSendMessage(authEmail, request);
 	}
 
 	@GetMapping("/history/{receiverEmail}")
-	public List<ChatMessage> getChatHistory(@PathVariable String receiverEmail) {
-		String myEmail = getCurrentUserEmail();
-		String targetEmail = receiverEmail != null ? receiverEmail.trim().toLowerCase() : "";
-		
-		// Mark all unread messages from target to me as READ
-		List<ChatMessage> unread = chatMessageRepository.findBySenderIgnoreCaseAndReceiverIgnoreCaseAndIsReadFalse(targetEmail, myEmail);
-		if (!unread.isEmpty()) {
-			for (ChatMessage msg : unread) {
-				msg.setRead(true);
-			}
-			chatMessageRepository.saveAll(unread);
-		}
+	public List<ChatMessage> getChatHistory(Principal principal, @PathVariable String receiverEmail) {
+		String authEmail = getCurrentUserEmail(principal);
+		return chatService.getChatHistory(authEmail, receiverEmail);
+	}
 
-		// Fetch messages in both directions
-		List<ChatMessage> sentByMe = chatMessageRepository.findBySenderIgnoreCaseAndReceiverIgnoreCase(myEmail, targetEmail);
-		List<ChatMessage> sentToMe = chatMessageRepository.findBySenderIgnoreCaseAndReceiverIgnoreCase(targetEmail, myEmail);
-
-		List<ChatMessage> all = new ArrayList<>(sentByMe);
-		all.addAll(sentToMe);
-
-		// Deduplicate by ID and sort chronologically by timestamp
-		Map<String, ChatMessage> map = new HashMap<>();
-		for (ChatMessage msg : all) {
-			if (msg.getId() != null) {
-				map.put(msg.getId(), msg);
-			}
-		}
-
-		return map.values().stream()
-				.sorted(Comparator.comparing(ChatMessage::getTimestamp, Comparator.nullsFirst(Comparator.naturalOrder())))
-				.collect(Collectors.toList());
+	@PostMapping("/mark-read/{senderEmail}")
+	public Map<String, String> markRead(Principal principal, @PathVariable String senderEmail) {
+		String authEmail = getCurrentUserEmail(principal);
+		chatService.markMessagesAsRead(authEmail, senderEmail);
+		Map<String, String> response = new HashMap<>();
+		response.put("status", "success");
+		return response;
 	}
 
 	@GetMapping("/unread")
-	public Map<String, Integer> getUnreadCounts() {
-		String myEmail = getCurrentUserEmail();
-		List<ChatMessage> unreadMessages = chatMessageRepository.findByReceiverIgnoreCaseAndIsReadFalse(myEmail);
-		
-		Map<String, Integer> counts = new HashMap<>();
-		for (ChatMessage msg : unreadMessages) {
-			if (msg.getSender() != null) {
-				String senderLower = msg.getSender().trim().toLowerCase();
-				counts.put(senderLower, counts.getOrDefault(senderLower, 0) + 1);
-			}
-		}
-		return counts;
+	public Map<String, Integer> getUnreadCounts(Principal principal) {
+		String authEmail = getCurrentUserEmail(principal);
+		return chatService.getUnreadCounts(authEmail);
 	}
 
 	@GetMapping("/conversations")
-	public List<ChatMessage> getConversations() {
-		String myEmail = getCurrentUserEmail();
-		List<ChatMessage> allMsgs = chatMessageRepository.findBySenderIgnoreCaseOrReceiverIgnoreCase(myEmail, myEmail);
+	public List<ChatMessage> getConversations(Principal principal) {
+		String authEmail = getCurrentUserEmail(principal);
+		return chatService.getConversations(authEmail);
+	}
 
-		allMsgs.sort(Comparator.comparing(ChatMessage::getTimestamp, Comparator.nullsFirst(Comparator.reverseOrder())));
+	@GetMapping("/presence/{userEmail}")
+	public Map<String, Object> getPresence(@PathVariable String userEmail) {
+		Map<String, Object> presence = new HashMap<>();
+		boolean isOnline = PresenceEventListener.isUserOnline(userEmail);
+		LocalDateTime lastSeen = PresenceEventListener.getLastSeen(userEmail);
 
-		List<ChatMessage> conversations = new ArrayList<>();
-		Set<String> processedUsers = new HashSet<>();
-
-		for (ChatMessage msg : allMsgs) {
-			String sender = msg.getSender() != null ? msg.getSender().trim().toLowerCase() : "";
-			String receiver = msg.getReceiver() != null ? msg.getReceiver().trim().toLowerCase() : "";
-
-			String otherUser = sender.equals(myEmail) ? receiver : sender;
-			if (!otherUser.isEmpty() && !processedUsers.contains(otherUser)) {
-				processedUsers.add(otherUser);
-				conversations.add(msg);
-			}
-		}
-		return conversations;
+		presence.put("userEmail", userEmail != null ? userEmail.trim().toLowerCase() : "");
+		presence.put("online", isOnline);
+		presence.put("lastSeen", lastSeen != null ? lastSeen.toString() : null);
+		return presence;
 	}
 }
