@@ -48,6 +48,9 @@ public class AdminService {
 	private FacultyRepository facultyRepository;
 
 	@Autowired(required = false)
+	private com.alumni.management.student.repository.StudentProfileRepository studentProfileRepository;
+
+	@Autowired(required = false)
 	private JobRepository jobRepository;
 
 	@Autowired(required = false)
@@ -67,6 +70,11 @@ public class AdminService {
 			Optional<FacultyProfile> fp = facultyRepository.findByUserId(user.getId());
 			if (fp.isPresent() && fp.get().getDepartment() != null && !fp.get().getDepartment().isEmpty()) {
 				return fp.get().getDepartment();
+			}
+		} else if ("STUDENT".equals(role) && studentProfileRepository != null) {
+			Optional<com.alumni.management.student.entity.StudentProfile> sp = studentProfileRepository.findByUserId(user.getId());
+			if (sp.isPresent() && sp.get().getDepartment() != null && !sp.get().getDepartment().isEmpty()) {
+				return sp.get().getDepartment();
 			}
 		}
 		return "MCA"; // Default department
