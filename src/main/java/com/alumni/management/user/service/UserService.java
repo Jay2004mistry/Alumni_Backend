@@ -30,22 +30,52 @@ public class UserService {
 	JwtUtil jwtUtil;
 	@Autowired
 	com.alumni.management.email.service.EmailService emailService;
+	@Autowired
+	com.alumni.management.verification.service.VerificationService verificationService;
 
 	public User createUser(User user) {
+		String normalizedEmail = user.getEmail() != null ? user.getEmail().trim().toLowerCase(java.util.Locale.ROOT) : "";
+		user.setEmail(normalizedEmail);
 
-//		below 2 line is just for chekking the role if is it availble or not
+		java.util.Optional<User> existingUserOpt = userRepository.findByEmail(normalizedEmail);
+		if (existingUserOpt.isPresent()) {
+			User existingUser = existingUserOpt.get();
+			if (existingUser.isVerified()) {
+				throw new com.alumni.management.verification.exception.UserAlreadyExistsException(
+						"An account with this email is already registered and verified. Please log in.");
+			}
+			// Unverified account exists: update credentials and re-initiate verification
+			existingUser.setName(user.getName());
+			existingUser.setPassword(passwordEncoder.encode(user.getPassword()));
+			existingUser.setUniversityNumber(user.getUniversityNumber());
 
-		Role role = roleRepository.findByRoleName(user.getRole().getRoleName())
+			String roleName = (user.getRole() != null && user.getRole().getRoleName() != null)
+					? user.getRole().getRoleName()
+					: "ALUMNI";
+			Role role = roleRepository.findByRoleName(roleName)
+					.orElseThrow(() -> new ResourceNotFoundException("Role not found"));
+			existingUser.setRole(role);
+			existingUser.setVerified(false);
+			User saved = userRepository.save(existingUser);
+
+			verificationService.sendVerificationOtp(normalizedEmail, com.alumni.management.verification.enums.VerificationPurpose.ACCOUNT_REGISTRATION);
+			return saved;
+		}
+
+		String roleName = (user.getRole() != null && user.getRole().getRoleName() != null)
+				? user.getRole().getRoleName()
+				: "ALUMNI";
+		Role role = roleRepository.findByRoleName(roleName)
 				.orElseThrow(() -> new ResourceNotFoundException("Role not found"));
 
-//		If role exist set that role	
 		user.setRole(role);
-
-//		Set password by doing encrypted before pass to save() function
 		user.setPassword(passwordEncoder.encode(user.getPassword()));
+		user.setVerified(false);
 
-//		Set that user with role in DB
-		return userRepository.save(user);
+		User saved = userRepository.save(user);
+
+		verificationService.sendVerificationOtp(normalizedEmail, com.alumni.management.verification.enums.VerificationPurpose.ACCOUNT_REGISTRATION);
+		return saved;
 	}
 
 //	We write list<userResponseDTO> because it give list of user dto(Dummy entity) not entity(DB)
@@ -94,13 +124,20 @@ public class UserService {
 	}
 
 	public LoginResponseDto login(LoginRequestDto request) {
+		String normalizedEmail = request.getEmail() != null ? request.getEmail().trim().toLowerCase(java.util.Locale.ROOT) : "";
 
-		User user = userRepository.findByEmail(request.getEmail())
+		User user = userRepository.findByEmail(normalizedEmail)
 				.orElseThrow(() -> new ResourceNotFoundException("Invalid email or password"));
 
 		if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
 			throw new ResourceNotFoundException("Invalid email or password");
 		}
+
+		if (!user.isVerified()) {
+			throw new com.alumni.management.verification.exception.AccountNotVerifiedException(
+					"Account is not verified. Please verify your email before logging in.");
+		}
+
 	    String token = jwtUtil.generateToken(user.getEmail());
 
 	    return new LoginResponseDto(
@@ -148,10 +185,6 @@ public class UserService {
 		String code = String.format("%06d", new java.util.Random().nextInt(900000) + 100000);
 		long expiry = System.currentTimeMillis() + (15 * 60 * 1000); // 15 minutes
 		otpStorage.put(user.getEmail().toLowerCase().trim(), new OtpData(code, expiry));
-
-		System.out.println("==================================================");
-		System.out.println("🔐 FORGOT PASSWORD OTP FOR [" + user.getEmail() + "]: " + code);
-		System.out.println("==================================================");
 
 		// Send real OTP Email
 		emailService.sendOtpEmail(user.getEmail(), code);

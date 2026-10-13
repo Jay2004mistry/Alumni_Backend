@@ -38,6 +38,7 @@ public class SecurityConfig {
                     .requestMatchers("/api/users/forgot-password").permitAll()
                     .requestMatchers("/api/users/reset-password").permitAll()
                     .requestMatchers("/api/users").permitAll()
+                    .requestMatchers("/api/auth/verification/**").permitAll()
                     .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/events").permitAll()
                     .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/jobs").permitAll()
                     .requestMatchers("/uploads/**").permitAll()
