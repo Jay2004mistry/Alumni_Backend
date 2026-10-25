@@ -121,6 +121,12 @@ public class JobService {
 		return jobs.stream().map(this::convertToDto).collect(Collectors.toList());
 	}
 
+	public List<JobDto> getMyJobs() {
+		User user = getCurrUser();
+		List<Job> jobs = jobRepository.findByUserId(user.getId());
+		return jobs.stream().map(this::convertToDto).collect(Collectors.toList());
+	}
+
 	@Transactional
 	public String updateJob(Long id, JobDto jobDto) {
 		User currentUser = getCurrUser();

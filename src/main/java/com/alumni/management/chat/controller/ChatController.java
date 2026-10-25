@@ -9,6 +9,8 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -47,10 +49,10 @@ public class ChatController {
 	@MessageMapping("/chat.send")
 	public void sendMessage(Principal principal, @Payload ChatSendRequest request) {
 		String authEmail = getCurrentUserEmail(principal);
-		log.info("📥 BACKEND CHAT RECEIVED: authenticatedUser={}, receiver={}, content={}",
+		log.info("📥 BACKEND CHAT RECEIVED: authenticatedUser={}, receiver={}, payloadLength={}",
 				authEmail,
 				request != null ? request.getReceiver() : null,
-				request != null ? request.getContent() : null);
+				(request != null && request.getContent() != null) ? request.getContent().length() : 0);
 		chatService.processAndSendMessage(authEmail, request);
 	}
 
@@ -63,10 +65,10 @@ public class ChatController {
 	@PostMapping("/send")
 	public ChatMessage sendRestMessage(Principal principal, @RequestBody ChatSendRequest request) {
 		String authEmail = getCurrentUserEmail(principal);
-		log.info("📥 REST CHAT RECEIVED: authenticatedUser={}, receiver={}, content={}",
+		log.info("📥 REST CHAT RECEIVED: authenticatedUser={}, receiver={}, payloadLength={}",
 				authEmail,
 				request != null ? request.getReceiver() : null,
-				request != null ? request.getContent() : null);
+				(request != null && request.getContent() != null) ? request.getContent().length() : 0);
 		return chatService.processAndSendMessage(authEmail, request);
 	}
 
@@ -97,15 +99,48 @@ public class ChatController {
 		return chatService.getConversations(authEmail);
 	}
 
-	@GetMapping("/presence/{userEmail}")
-	public Map<String, Object> getPresence(@PathVariable String userEmail) {
-		Map<String, Object> presence = new HashMap<>();
-		boolean isOnline = PresenceEventListener.isUserOnline(userEmail);
-		LocalDateTime lastSeen = PresenceEventListener.getLastSeen(userEmail);
+	@GetMapping("/key/{partnerEmail}")
+	public ResponseEntity<?> getConversationKey(Principal principal, @PathVariable String partnerEmail) {
+		String authEmail = getCurrentUserEmail(principal);
+		if (authEmail.isEmpty()) {
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+		}
+		if (partnerEmail == null || partnerEmail.trim().isEmpty() || authEmail.equalsIgnoreCase(partnerEmail.trim())) {
+			return ResponseEntity.badRequest().body(Map.of("error", "Invalid partner email"));
+		}
+		try {
+			String key = chatService.getOrCreateConversationKey(authEmail, partnerEmail);
+			Map<String, String> response = new HashMap<>();
+			response.put("key", key);
+			return ResponseEntity.ok(response);
+		} catch (Exception e) {
+			log.error("Failed to get conversation key: {}", e.getMessage());
+			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Key retrieval error"));
+		}
+	}
 
-		presence.put("userEmail", userEmail != null ? userEmail.trim().toLowerCase() : "");
+	@GetMapping("/presence/{userEmail}")
+	public ResponseEntity<?> getPresence(Principal principal, @PathVariable String userEmail) {
+		String authEmail = getCurrentUserEmail(principal);
+		if (authEmail.isEmpty()) {
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+		}
+		String target = userEmail != null ? userEmail.trim().toLowerCase() : "";
+		if (target.isEmpty()) {
+			return ResponseEntity.badRequest().body(Map.of("error", "Target email required"));
+		}
+		if (!authEmail.equalsIgnoreCase(target) && !chatService.hasConversationRelationship(authEmail, target)) {
+			return ResponseEntity.status(HttpStatus.FORBIDDEN)
+					.body(Map.of("error", "Presence visibility restricted to conversation participants"));
+		}
+
+		Map<String, Object> presence = new HashMap<>();
+		boolean isOnline = PresenceEventListener.isUserOnline(target);
+		LocalDateTime lastSeen = PresenceEventListener.getLastSeen(target);
+
+		presence.put("userEmail", target);
 		presence.put("online", isOnline);
 		presence.put("lastSeen", lastSeen != null ? lastSeen.toString() : null);
-		return presence;
+		return ResponseEntity.ok(presence);
 	}
 }

@@ -59,6 +59,9 @@ public class AdminService {
 	@Autowired(required = false)
 	private PostRepository postRepository;
 
+	@Autowired(required = false)
+	private com.alumni.management.verification.service.VerificationService verificationService;
+
 	private String getUserDepartment(User user) {
 		String role = user.getRole() != null ? user.getRole().getRoleName().toUpperCase() : "";
 		if ("ALUMNI".equals(role) && alumniProfileRepository != null) {
@@ -82,32 +85,39 @@ public class AdminService {
 
 	public List<UserResponseDto> getAllUsers() {
 		List<User> users = userRepository.findAll();
-		return users.stream().map(user -> new UserResponseDto(
-				user.getId(),
-				user.getName(),
-				user.getEmail(),
-				user.getRole() != null ? user.getRole().getRoleName() : "USER",
-				getUserDepartment(user)
-		)).collect(Collectors.toList());
+		return users.stream()
+				.filter(user -> user.getRole() == null || !"ADMIN".equalsIgnoreCase(user.getRole().getRoleName()))
+				.map(user -> new UserResponseDto(
+						user.getId(),
+						user.getName(),
+						user.getEmail(),
+						user.getRole() != null ? user.getRole().getRoleName() : "USER",
+						getUserDepartment(user)
+				)).collect(Collectors.toList());
 	}
 
 	public List<UserResponseDto> getUserByRole(String roleName) {
+		if ("ADMIN".equalsIgnoreCase(roleName)) {
+			return List.of();
+		}
 		List<User> users = userRepository.findByRole_RoleName(roleName);
 		if (users.isEmpty()) {
 			return List.of();
 		}
-		return users.stream().map(user -> new UserResponseDto(
-				user.getId(),
-				user.getName(),
-				user.getEmail(),
-				user.getRole() != null ? user.getRole().getRoleName() : "USER",
-				getUserDepartment(user)
-		)).collect(Collectors.toList());
+		return users.stream()
+				.filter(user -> user.getRole() == null || !"ADMIN".equalsIgnoreCase(user.getRole().getRoleName()))
+				.map(user -> new UserResponseDto(
+						user.getId(),
+						user.getName(),
+						user.getEmail(),
+						user.getRole() != null ? user.getRole().getRoleName() : "USER",
+						getUserDepartment(user)
+				)).collect(Collectors.toList());
 	}
 
 	public AdminStatsDto getAdminStats() {
 		List<User> allUsers = userRepository.findAll();
-		long totalUsers = allUsers.size();
+		long totalUsers = allUsers.stream().filter(u -> u.getRole() == null || !"ADMIN".equalsIgnoreCase(u.getRole().getRoleName())).count();
 		long totalAlumni = allUsers.stream().filter(u -> u.getRole() != null && "ALUMNI".equalsIgnoreCase(u.getRole().getRoleName())).count();
 		long totalFaculty = allUsers.stream().filter(u -> u.getRole() != null && "FACULTY".equalsIgnoreCase(u.getRole().getRoleName())).count();
 		long totalStudents = allUsers.stream().filter(u -> u.getRole() != null && "STUDENT".equalsIgnoreCase(u.getRole().getRoleName())).count();
@@ -154,6 +164,10 @@ public class AdminService {
 	public String deleteUser(Long userId) {
 		User user = userRepository.findById(userId)
 				.orElseThrow(() -> new ResourceNotFoundException("User not found with id " + userId));
+
+		if (user.getRole() != null && "ADMIN".equalsIgnoreCase(user.getRole().getRoleName())) {
+			throw new IllegalArgumentException("Admin accounts cannot be deleted");
+		}
 
 		// Clean up profile associated strictly with this specific user
 		if (alumniProfileRepository != null) {
@@ -205,6 +219,14 @@ public class AdminService {
 		user.setRole(role);
 
 		User savedUser = userRepository.save(user);
+
+		if (verificationService != null) {
+			try {
+				verificationService.sendVerificationOtp(savedUser.getEmail(), com.alumni.management.verification.enums.VerificationPurpose.ACCOUNT_ACTIVATION);
+			} catch (Exception e) {
+				// Don't fail admin user creation if email service fails or is unconfigured
+			}
+		}
 
 		String dept = request.getDepartment() != null && !request.getDepartment().isEmpty() ? request.getDepartment() : "MCA";
 

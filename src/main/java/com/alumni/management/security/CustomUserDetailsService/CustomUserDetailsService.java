@@ -30,6 +30,10 @@ public class CustomUserDetailsService
         return new org.springframework.security.core.userdetails.User(
                 user.getEmail(),
                 user.getPassword(),
+                user.isVerified(),
+                true,
+                true,
+                true,
                 Collections.singletonList(
                     new SimpleGrantedAuthority("ROLE_" + user.getRole().getRoleName())
                 ));

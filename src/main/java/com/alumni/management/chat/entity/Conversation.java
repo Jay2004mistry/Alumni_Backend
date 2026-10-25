@@ -33,6 +33,8 @@ public class Conversation {
 
     private List<ParticipantUnread> unreadCounts = new ArrayList<>();
 
+    private String encryptionKey;
+
     private LocalDateTime createdAt = LocalDateTime.now();
     private LocalDateTime updatedAt = LocalDateTime.now();
 

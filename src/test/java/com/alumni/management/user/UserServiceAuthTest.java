@@ -201,4 +201,114 @@ class UserServiceAuthTest {
 
         verify(verificationService, times(1)).sendVerificationOtp(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION);
     }
+
+    @Test
+    @DisplayName("deleteUser on ADMIN user is rejected with IllegalArgumentException")
+    void deleteUser_AdminRole_ThrowsIllegalArgumentException() {
+        Role adminRole = new Role("ADMIN");
+        User adminUser = new User();
+        adminUser.setId(99L);
+        adminUser.setEmail("admin@alumni.com");
+        adminUser.setRole(adminRole);
+
+        when(userRepository.findById(99L)).thenReturn(Optional.of(adminUser));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> {
+            userService.deleteUser(99L);
+        });
+
+        assertEquals("Admin accounts cannot be deleted", ex.getMessage());
+        verify(userRepository, never()).delete(adminUser);
+        verify(userRepository, never()).deleteById(99L);
+    }
+
+    @Test
+    @DisplayName("deleteUser on ordinary non-admin user succeeds")
+    void deleteUser_OrdinaryUser_Succeeds() {
+        Role studentRole = new Role("STUDENT");
+        User studentUser = new User();
+        studentUser.setId(105L);
+        studentUser.setEmail("student@alumni.com");
+        studentUser.setRole(studentRole);
+
+        when(userRepository.findById(105L)).thenReturn(Optional.of(studentUser));
+
+        assertDoesNotThrow(() -> userService.deleteUser(105L));
+        verify(userRepository, times(1)).delete(studentUser);
+    }
+
+    @Test
+    @DisplayName("Unverified STUDENT account must be rejected at login")
+    void testLogin_UnverifiedStudent_Rejected() {
+        Role studentRole = new Role("STUDENT");
+        User unverifiedStudent = new User();
+        unverifiedStudent.setEmail("student@gls.edu.in");
+        unverifiedStudent.setPassword(passwordEncoder.encode(rawPassword));
+        unverifiedStudent.setRole(studentRole);
+        unverifiedStudent.setVerified(false);
+
+        when(userRepository.findByEmail("student@gls.edu.in")).thenReturn(Optional.of(unverifiedStudent));
+
+        LoginRequestDto request = new LoginRequestDto();
+        request.setEmail("student@gls.edu.in");
+        request.setPassword(rawPassword);
+
+        AccountNotVerifiedException ex = assertThrows(AccountNotVerifiedException.class, () ->
+                userService.login(request)
+        );
+
+        assertTrue(ex.getMessage().contains("Account is not verified"));
+        verify(jwtUtil, never()).generateToken(anyString());
+    }
+
+    @Test
+    @DisplayName("Unverified FACULTY account must be rejected at login")
+    void testLogin_UnverifiedFaculty_Rejected() {
+        Role facultyRole = new Role("FACULTY");
+        User unverifiedFaculty = new User();
+        unverifiedFaculty.setEmail("faculty@gls.edu.in");
+        unverifiedFaculty.setPassword(passwordEncoder.encode(rawPassword));
+        unverifiedFaculty.setRole(facultyRole);
+        unverifiedFaculty.setVerified(false);
+
+        when(userRepository.findByEmail("faculty@gls.edu.in")).thenReturn(Optional.of(unverifiedFaculty));
+
+        LoginRequestDto request = new LoginRequestDto();
+        request.setEmail("faculty@gls.edu.in");
+        request.setPassword(rawPassword);
+
+        AccountNotVerifiedException ex = assertThrows(AccountNotVerifiedException.class, () ->
+                userService.login(request)
+        );
+
+        assertTrue(ex.getMessage().contains("Account is not verified"));
+        verify(jwtUtil, never()).generateToken(anyString());
+    }
+
+    @Test
+    @DisplayName("Verified STUDENT account logs in successfully and receives JWT")
+    void testLogin_VerifiedStudent_Succeeds() {
+        Role studentRole = new Role("STUDENT");
+        User verifiedStudent = new User();
+        verifiedStudent.setEmail("student@gls.edu.in");
+        verifiedStudent.setName("Kathan Student");
+        verifiedStudent.setPassword(passwordEncoder.encode(rawPassword));
+        verifiedStudent.setRole(studentRole);
+        verifiedStudent.setVerified(true);
+
+        when(userRepository.findByEmail("student@gls.edu.in")).thenReturn(Optional.of(verifiedStudent));
+        when(jwtUtil.generateToken("student@gls.edu.in")).thenReturn("mock.student.jwt");
+
+        LoginRequestDto request = new LoginRequestDto();
+        request.setEmail("student@gls.edu.in");
+        request.setPassword(rawPassword);
+
+        LoginResponseDto response = userService.login(request);
+
+        assertNotNull(response);
+        assertEquals("mock.student.jwt", response.getToken());
+        assertEquals("Kathan Student", response.getName());
+        assertEquals("STUDENT", response.getRole());
+    }
 }
+

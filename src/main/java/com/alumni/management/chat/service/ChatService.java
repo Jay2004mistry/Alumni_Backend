@@ -74,8 +74,8 @@ public class ChatService {
         }
 
         String conversationId = Conversation.generateConversationId(sender, receiver);
-        log.info("📨 PROCESSING MESSAGE: sender={}, receiver={}, conversationId={}, content={}",
-                sender, receiver, conversationId, request.getContent());
+        log.info("📨 PROCESSING MESSAGE: sender={}, receiver={}, conversationId={}, payloadLength={}",
+                sender, receiver, conversationId, request.getContent() != null ? request.getContent().length() : 0);
 
         ChatMessage chatMessage = new ChatMessage();
         chatMessage.setConversationId(conversationId);
@@ -158,9 +158,6 @@ public class ChatService {
         String user1 = myEmail != null ? myEmail.trim().toLowerCase() : "";
         String user2 = targetEmail != null ? targetEmail.trim().toLowerCase() : "";
         String conversationId = Conversation.generateConversationId(user1, user2);
-
-        // Mark unread messages sent by target to me as READ
-        markMessagesAsRead(user1, user2);
 
         List<ChatMessage> messages = chatMessageRepository.findByConversationIdOrderByTimestampAsc(conversationId);
         if (messages.isEmpty()) {
@@ -285,5 +282,67 @@ public class ChatService {
             } catch (Exception e) {
             }
         }
+    }
+
+    public String getOrCreateConversationKey(String authenticatedUser, String partnerEmail) {
+        if (authenticatedUser == null || partnerEmail == null) {
+            throw new IllegalArgumentException("User emails must not be null");
+        }
+        String u1 = authenticatedUser.trim().toLowerCase();
+        String u2 = partnerEmail.trim().toLowerCase();
+        if (u1.isEmpty() || u2.isEmpty()) {
+            throw new IllegalArgumentException("User emails must not be empty");
+        }
+        String conversationId = Conversation.generateConversationId(u1, u2);
+        Conversation conv = conversationRepository.findById(conversationId).orElseGet(() -> {
+            Conversation newConv = new Conversation();
+            newConv.setId(conversationId);
+            newConv.setParticipants(List.of(u1, u2));
+            return newConv;
+        });
+
+        if (conv.getEncryptionKey() == null || conv.getEncryptionKey().trim().isEmpty()) {
+            byte[] randomBytes = new byte[32];
+            new java.security.SecureRandom().nextBytes(randomBytes);
+            String base64Key = java.util.Base64.getEncoder().encodeToString(randomBytes);
+            conv.setEncryptionKey(base64Key);
+            conversationRepository.save(conv);
+        }
+        return conv.getEncryptionKey();
+    }
+
+    public boolean hasConversationRelationship(String user1, String user2) {
+        if (user1 == null || user2 == null) return false;
+        String u1 = user1.trim().toLowerCase();
+        String u2 = user2.trim().toLowerCase();
+        if (u1.isEmpty() || u2.isEmpty()) return false;
+        if (u1.equalsIgnoreCase(u2)) return true;
+
+        String conversationId = Conversation.generateConversationId(u1, u2);
+        if (conversationRepository.findById(conversationId).isPresent()) {
+            return true;
+        }
+        return !chatMessageRepository.findByConversationIdOrderByTimestampAsc(conversationId).isEmpty();
+    }
+
+    public java.util.Set<String> getConversationPartners(String email) {
+        if (email == null || email.trim().isEmpty()) {
+            return java.util.Collections.emptySet();
+        }
+        String normalized = email.trim().toLowerCase();
+        List<Conversation> convs = conversationRepository.findByParticipantsContainingOrderByLastMessageAtDesc(normalized);
+        java.util.Set<String> partners = new java.util.HashSet<>();
+        if (convs != null) {
+            for (Conversation c : convs) {
+                if (c.getParticipants() != null) {
+                    for (String p : c.getParticipants()) {
+                        if (p != null && !p.trim().equalsIgnoreCase(normalized)) {
+                            partners.add(p.trim().toLowerCase());
+                        }
+                    }
+                }
+            }
+        }
+        return partners;
     }
 }

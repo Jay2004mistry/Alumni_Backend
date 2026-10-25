@@ -54,8 +54,8 @@ public class VerificationService {
     public VerificationResponseDto sendVerificationOtp(String rawEmail, VerificationPurpose purpose) {
         String email = normalizeEmail(rawEmail);
 
-        // If purpose is ACCOUNT_REGISTRATION and user is already registered & verified, reject
-        if (purpose == VerificationPurpose.ACCOUNT_REGISTRATION) {
+        // If purpose is ACCOUNT_REGISTRATION or ACCOUNT_ACTIVATION and user is already registered & verified, reject
+        if (purpose == VerificationPurpose.ACCOUNT_REGISTRATION || purpose == VerificationPurpose.ACCOUNT_ACTIVATION) {
             Optional<User> existingUser = userRepository.findByEmail(email);
             if (existingUser.isPresent() && existingUser.get().isVerified()) {
                 throw new UserAlreadyExistsException("This email is already registered and verified. Please log in.");
@@ -122,7 +122,7 @@ public class VerificationService {
     /**
      * Validate submitted OTP with attempt limits, expiry, and post-verification actions.
      */
-    @Transactional
+    @Transactional(noRollbackFor = {InvalidOtpException.class, MaxAttemptsExceededException.class})
     public VerificationResponseDto verifyOtp(String rawEmail, String submittedOtp, VerificationPurpose purpose) {
         String email = normalizeEmail(rawEmail);
 
@@ -153,7 +153,7 @@ public class VerificationService {
         if (!passwordEncoder.matches(submittedOtp, verification.getOtpHash())) {
             int currentAttempts = verification.getAttempts() + 1;
             verification.setAttempts(currentAttempts);
-            verificationRepository.save(verification);
+            verificationRepository.saveAndFlush(verification);
 
             int remaining = MAX_ATTEMPTS - currentAttempts;
             if (remaining <= 0) {

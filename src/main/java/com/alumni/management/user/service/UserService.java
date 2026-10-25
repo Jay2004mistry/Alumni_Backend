@@ -99,10 +99,11 @@ public class UserService {
 	}
 
 	public void deleteUser(Long id) {
-		if (!userRepository.existsById(id)) {
-			throw new ResourceNotFoundException("User not found");
+		User user = userRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("User not found"));
+		if (user.getRole() != null && "ADMIN".equalsIgnoreCase(user.getRole().getRoleName())) {
+			throw new IllegalArgumentException("Admin accounts cannot be deleted");
 		}
-		userRepository.deleteById(id);
+		userRepository.delete(user);
 	}
 
 	public User updateUserData(Long id, User user) {

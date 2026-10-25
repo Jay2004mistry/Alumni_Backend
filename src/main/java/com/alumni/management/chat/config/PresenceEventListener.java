@@ -28,6 +28,9 @@ public class PresenceEventListener {
     @Autowired
     private ChatClock chatClock;
 
+    @Autowired
+    private com.alumni.management.chat.service.ChatService chatService;
+
     private static final Map<String, Set<String>> userSessions = new ConcurrentHashMap<>();
     private static final Map<String, LocalDateTime> userLastSeen = new ConcurrentHashMap<>();
 
@@ -49,11 +52,7 @@ public class PresenceEventListener {
 
             if (wasOffline) {
                 PresenceEvent presence = new PresenceEvent(email, "ONLINE", chatClock.now());
-                try {
-                    messagingTemplate.convertAndSend("/topic/presence", presence);
-                } catch (Exception e) {
-                    log.error("Failed to broadcast presence online: {}", e.getMessage());
-                }
+                dispatchPresenceToPartners(email, presence);
             }
         }
     }
@@ -74,13 +73,27 @@ public class PresenceEventListener {
                     LocalDateTime now = chatClock.now();
                     userLastSeen.put(email, now);
                     PresenceEvent presence = new PresenceEvent(email, "OFFLINE", now);
+                    dispatchPresenceToPartners(email, presence);
+                }
+            }
+        }
+    }
+
+    private void dispatchPresenceToPartners(String email, PresenceEvent presence) {
+        try {
+            messagingTemplate.convertAndSendToUser(email, "/queue/presence", presence);
+            Set<String> partners = chatService.getConversationPartners(email);
+            if (partners != null) {
+                for (String partner : partners) {
                     try {
-                        messagingTemplate.convertAndSend("/topic/presence", presence);
+                        messagingTemplate.convertAndSendToUser(partner, "/queue/presence", presence);
                     } catch (Exception e) {
-                        log.error("Failed to broadcast presence offline: {}", e.getMessage());
+                        log.error("Failed to send presence to partner {}: {}", partner, e.getMessage());
                     }
                 }
             }
+        } catch (Exception e) {
+            log.error("Failed to dispatch presence for {}: {}", email, e.getMessage());
         }
     }
 

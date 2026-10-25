@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessageDeliveryException;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.messaging.simp.stomp.StompCommand;
@@ -70,26 +71,48 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 							String email = jwtUtil.extractEmail(token);
 							if (email != null && jwtUtil.validateToken(token)) {
 								UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+								if (!userDetails.isEnabled()) {
+									log.warn("⚠️ STOMP CONNECT UNVERIFIED USER: email={}", email);
+									throw new MessageDeliveryException("Unauthorized: Account not verified");
+								}
 								UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
 										userDetails, null, userDetails.getAuthorities());
 								accessor.setUser(auth);
 								log.info("🔐 STOMP CONNECT AUTHENTICATED: Principal = {}", auth.getName());
 							} else {
 								log.warn("⚠️ STOMP CONNECT INVALID TOKEN: email={}", email);
+								throw new MessageDeliveryException("Unauthorized: Invalid or expired token");
 							}
+						} catch (MessageDeliveryException e) {
+							throw e;
 						} catch (Exception e) {
 							log.error("❌ STOMP CONNECT AUTH EXCEPTION: {}", e.getMessage());
+							throw new MessageDeliveryException("Unauthorized: Token validation error");
 						}
 					} else {
 						log.warn("⚠️ STOMP CONNECT MISSING Authorization header");
+						throw new MessageDeliveryException("Unauthorized: Missing Authorization header");
 					}
 				} else if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
+					if (accessor.getUser() == null || accessor.getUser().getName() == null || accessor.getUser().getName().trim().isEmpty()) {
+						log.warn("⚠️ STOMP SUBSCRIBE UNAUTHENTICATED: destination={}", accessor.getDestination());
+						throw new MessageDeliveryException("Unauthorized: Authentication required to subscribe");
+					}
+					String destination = accessor.getDestination();
+					if (destination != null && (destination.equals("/topic/presence") || destination.startsWith("/topic/presence/"))) {
+						log.warn("⚠️ STOMP SUBSCRIBE FORBIDDEN TOPIC: user={}, destination={}", accessor.getUser().getName(), destination);
+						throw new MessageDeliveryException("Forbidden: Global presence topic is disabled. Subscribe to /user/queue/presence");
+					}
 					log.info("👂 STOMP SUBSCRIBE: user={}, destination={}",
-							accessor.getUser() != null ? accessor.getUser().getName() : "ANONYMOUS",
-							accessor.getDestination());
+							accessor.getUser().getName(),
+							destination);
 				} else if (StompCommand.SEND.equals(accessor.getCommand())) {
+					if (accessor.getUser() == null || accessor.getUser().getName() == null || accessor.getUser().getName().trim().isEmpty()) {
+						log.warn("⚠️ STOMP SEND UNAUTHENTICATED: destination={}", accessor.getDestination());
+						throw new MessageDeliveryException("Unauthorized: Authentication required to send");
+					}
 					log.info("📤 STOMP INBOUND SEND: user={}, destination={}",
-							accessor.getUser() != null ? accessor.getUser().getName() : "ANONYMOUS",
+							accessor.getUser().getName(),
 							accessor.getDestination());
 				}
 				return message;
