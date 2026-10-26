@@ -59,23 +59,8 @@ public class EventService {
 // Handle image upload if present
 		if (image != null && !image.isEmpty()) {
 			try {
-// Create upload directory if it doesn't exist
-				String uploadDir = "uploads/events/";
-				File directory = new File(uploadDir);
-				if (!directory.exists()) {
-					directory.mkdirs();
-				}
-
-// Generate unique filename
-				String fileName = System.currentTimeMillis() + "_" + image.getOriginalFilename();
-				File destFile = new File(directory.getAbsolutePath() + File.separator + fileName);
-
-// Save file
-				image.transferTo(destFile);
-
-// Set image URL (you can serve this statically)
-				event.setImageUrl("/uploads/events/" + fileName);
-
+				String imageUrl = com.alumni.management.security.FileUploadSecurityUtil.saveImageSafely(image, "uploads/events/");
+				event.setImageUrl(imageUrl);
 			} catch (IOException e) {
 				throw new RuntimeException("Failed to upload image", e);
 			}
@@ -181,15 +166,8 @@ public class EventService {
 
 		if (image != null && !image.isEmpty()) {
 			try {
-				String uploadDir = "uploads/events/";
-				File directory = new File(uploadDir);
-				if (!directory.exists()) {
-					directory.mkdirs();
-				}
-				String fileName = System.currentTimeMillis() + "_" + image.getOriginalFilename();
-				File destFile = new File(directory.getAbsolutePath() + File.separator + fileName);
-				image.transferTo(destFile);
-				existingEvent.setImageUrl("/uploads/events/" + fileName);
+				String imageUrl = com.alumni.management.security.FileUploadSecurityUtil.saveImageSafely(image, "uploads/events/");
+				existingEvent.setImageUrl(imageUrl);
 			} catch (IOException e) {
 				throw new RuntimeException("Failed to upload image", e);
 			}

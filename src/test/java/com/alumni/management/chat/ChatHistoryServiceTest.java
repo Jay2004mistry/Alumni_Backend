@@ -106,4 +106,59 @@ public class ChatHistoryServiceTest {
 		verify(chatMessageRepository).saveAll(List.of(unreadMsg));
 		verify(messagingTemplate).convertAndSendToUser(eq(user2), eq("/queue/status"), any(MessageStatusUpdateEvent.class));
 	}
+
+	@Test
+	void testSendMessageWithDuplicateClientMessageIdReturnsExistingWithoutResaving() {
+		ChatMessage existingMsg = new ChatMessage();
+		existingMsg.setId("msg-existing-1");
+		existingMsg.setClientMessageId("client-uuid-12345");
+		existingMsg.setSender(user1);
+		existingMsg.setReceiver(user2);
+		existingMsg.setContent("Hello duplicate");
+
+		com.alumni.management.chat.dto.ChatSendRequest request = new com.alumni.management.chat.dto.ChatSendRequest();
+		request.setClientMessageId("client-uuid-12345");
+		request.setReceiver(user2);
+		request.setContent("Hello duplicate");
+
+		when(chatMessageRepository.findBySenderAndClientMessageId(user1, "client-uuid-12345")).thenReturn(Optional.of(existingMsg));
+
+		ChatMessage result = chatService.processAndSendMessage(user1, request);
+
+		assertNotNull(result);
+		assertEquals("msg-existing-1", result.getId());
+		verify(chatMessageRepository, never()).save(any(ChatMessage.class));
+		verify(messagingTemplate, never()).convertAndSendToUser(any(), any(), any(ChatMessage.class));
+	}
+
+	@Test
+	void testSendMessageConcurrentDuplicateKeyCaughtRecoversExisting() {
+		com.alumni.management.chat.dto.ChatSendRequest request = new com.alumni.management.chat.dto.ChatSendRequest();
+		request.setClientMessageId("concurrent-uuid-999");
+		request.setReceiver(user2);
+		request.setContent("Hello concurrent");
+
+		// Initial lookup finds nothing
+		when(chatMessageRepository.findBySenderAndClientMessageId(user1, "concurrent-uuid-999")).thenReturn(Optional.empty());
+
+		// Concurrent insert triggers DuplicateKeyException on save
+		when(chatMessageRepository.save(any(ChatMessage.class)))
+				.thenThrow(new org.springframework.dao.DuplicateKeyException("E11000 duplicate key error"));
+
+		ChatMessage recoveredMsg = new ChatMessage();
+		recoveredMsg.setId("recovered-msg-999");
+		recoveredMsg.setClientMessageId("concurrent-uuid-999");
+		recoveredMsg.setSender(user1);
+		recoveredMsg.setReceiver(user2);
+
+		// Secondary lookup recovers the concurrently saved message
+		when(chatMessageRepository.findBySenderAndClientMessageId(user1, "concurrent-uuid-999"))
+				.thenReturn(Optional.empty())
+				.thenReturn(Optional.of(recoveredMsg));
+
+		ChatMessage result = chatService.processAndSendMessage(user1, request);
+		assertNotNull(result);
+		assertEquals("recovered-msg-999", result.getId());
+	}
 }
+

@@ -178,6 +178,10 @@ public class AdminService {
 			Optional<FacultyProfile> fp = facultyRepository.findByUserId(userId);
 			fp.ifPresent(facultyRepository::delete);
 		}
+		if (studentProfileRepository != null) {
+			Optional<com.alumni.management.student.entity.StudentProfile> sp = studentProfileRepository.findByUserId(userId);
+			sp.ifPresent(studentProfileRepository::delete);
+		}
 
 		// Clean up posts created strictly by this user
 		if (postRepository != null) {
@@ -230,7 +234,7 @@ public class AdminService {
 
 		String dept = request.getDepartment() != null && !request.getDepartment().isEmpty() ? request.getDepartment() : "MCA";
 
-		// Initialize profile if ALUMNI or FACULTY
+		// Initialize profile if ALUMNI, FACULTY, or STUDENT
 		if ("ALUMNI".equals(roleStr) && alumniProfileRepository != null) {
 			AlumniProfile ap = new AlumniProfile();
 			ap.setUser(savedUser);
@@ -241,6 +245,11 @@ public class AdminService {
 			fp.setUser(savedUser);
 			fp.setDepartment(dept);
 			facultyRepository.save(fp);
+		} else if ("STUDENT".equals(roleStr) && studentProfileRepository != null) {
+			com.alumni.management.student.entity.StudentProfile sp = new com.alumni.management.student.entity.StudentProfile();
+			sp.setUser(savedUser);
+			sp.setDepartment(dept);
+			studentProfileRepository.save(sp);
 		}
 
 		return new UserResponseDto(savedUser.getId(), savedUser.getName(), savedUser.getEmail(), savedUser.getRole().getRoleName(), dept);

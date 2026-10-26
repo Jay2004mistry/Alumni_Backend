@@ -43,6 +43,7 @@ public class UserController {
 	}
 
 	@DeleteMapping("/{id}")
+	@org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
 	public String deleteUser(@PathVariable Long id) {
 		userService.deleteUser(id);
 		return "Delete Successfully";
@@ -58,6 +59,16 @@ public class UserController {
 	    return userService.login(request);
 	}
 
+	@GetMapping("/me")
+	public UserResponseDto getCurrentUser() {
+		return userService.getCurrentUserProfile();
+	}
+
+	@PostMapping("/refresh-token")
+	public java.util.Map<String, String> refreshToken() {
+		return userService.refreshToken();
+	}
+
 	@GetMapping("/search/name/{name}")
 	public List<UserResponseDto> searchUsersByName(@PathVariable String name) {
 	    return userService.searchUsersByName(name);
@@ -65,21 +76,10 @@ public class UserController {
 
 	@PostMapping("/profile-image")
 	public java.util.Map<String, String> uploadProfileImage(@org.springframework.web.bind.annotation.RequestParam("image") org.springframework.web.multipart.MultipartFile image) {
-		if (image == null || image.isEmpty()) {
-			throw new RuntimeException("Image is empty");
-		}
 		try {
-			String uploadDir = "uploads/profiles/";
-			java.io.File directory = new java.io.File(uploadDir);
-			if (!directory.exists()) {
-				directory.mkdirs();
-			}
-			String fileName = System.currentTimeMillis() + "_" + image.getOriginalFilename();
-			java.io.File destFile = new java.io.File(directory.getAbsolutePath() + java.io.File.separator + fileName);
-			image.transferTo(destFile);
-			
+			String url = com.alumni.management.security.FileUploadSecurityUtil.saveImageSafely(image, "uploads/profiles/");
 			java.util.Map<String, String> res = new java.util.HashMap<>();
-			res.put("url", "/uploads/profiles/" + fileName);
+			res.put("url", url);
 			return res;
 		} catch (java.io.IOException e) {
 			throw new RuntimeException("Failed to save profile image", e);

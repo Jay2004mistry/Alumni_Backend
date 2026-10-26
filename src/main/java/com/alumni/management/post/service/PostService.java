@@ -35,6 +35,9 @@ public class PostService {
 	@Autowired
 	private FacultyRepository facultyRepository;
 
+	@Autowired(required = false)
+	private com.alumni.management.student.repository.StudentProfileRepository studentProfileRepository;
+
 	private User getCurrentUser() {
 		String email = SecurityContextHolder.getContext().getAuthentication().getName();
 		return userRepository.findByEmail(email).orElseThrow(() -> new RuntimeException("User not found"));
@@ -61,6 +64,20 @@ public class PostService {
 						com.alumni.management.faculty.entity.FacultyProfile profile = facultyProfileOpt.get();
 						if (profile.getDepartment() != null) department = profile.getDepartment();
 						if (profile.getDesignation() != null) designation = profile.getDesignation();
+					}
+				} else if ("STUDENT".equals(roleName)) {
+					if (studentProfileRepository != null) {
+						java.util.Optional<com.alumni.management.student.entity.StudentProfile> spOpt = studentProfileRepository.findByUserId(userId);
+						if (spOpt.isPresent()) {
+							com.alumni.management.student.entity.StudentProfile profile = spOpt.get();
+							if (profile.getDepartment() != null && !profile.getDepartment().isEmpty()) department = profile.getDepartment();
+							if (profile.getBatchYear() != null) designation = "Class of " + profile.getBatchYear();
+							else designation = "Student";
+						} else {
+							designation = "Student";
+						}
+					} else {
+						designation = "Student";
 					}
 				} else if ("ADMIN".equals(roleName)) {
 					department = "Administration";
@@ -93,17 +110,8 @@ public class PostService {
 
 		if (image != null && !image.isEmpty()) {
 			try {
-				String uploadDir = "uploads/posts/";
-				File directory = new File(uploadDir);
-				if (!directory.exists()) {
-					directory.mkdirs();
-				}
-
-				String fileName = System.currentTimeMillis() + "_" + image.getOriginalFilename();
-				File destFile = new File(directory.getAbsolutePath() + File.separator + fileName);
-				image.transferTo(destFile);
-
-				post.setImageUrl("/uploads/posts/" + fileName);
+				String imageUrl = com.alumni.management.security.FileUploadSecurityUtil.saveImageSafely(image, "uploads/posts/");
+				post.setImageUrl(imageUrl);
 			} catch (IOException e) {
 				throw new RuntimeException("Failed to upload post image", e);
 			}

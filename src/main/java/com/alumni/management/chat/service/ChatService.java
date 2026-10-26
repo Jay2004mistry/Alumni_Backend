@@ -77,11 +77,22 @@ public class ChatService {
         log.info("📨 PROCESSING MESSAGE: sender={}, receiver={}, conversationId={}, payloadLength={}",
                 sender, receiver, conversationId, request.getContent() != null ? request.getContent().length() : 0);
 
+        if (request.getClientMessageId() != null && !request.getClientMessageId().trim().isEmpty()) {
+            java.util.Optional<ChatMessage> existing = chatMessageRepository.findBySenderAndClientMessageId(sender, request.getClientMessageId().trim());
+            if (existing.isPresent()) {
+                log.info("🔁 Duplicate message detected by clientMessageId for sender {}: {}", sender, request.getClientMessageId());
+                return existing.get();
+            }
+        }
+
         ChatMessage chatMessage = new ChatMessage();
         chatMessage.setConversationId(conversationId);
         chatMessage.setSender(sender);
         chatMessage.setReceiver(receiver);
         chatMessage.setContent(request.getContent());
+        if (request.getClientMessageId() != null && !request.getClientMessageId().trim().isEmpty()) {
+            chatMessage.setClientMessageId(request.getClientMessageId().trim());
+        }
 
         MessageType messageType = MessageType.TEXT;
         if (request.getType() != null && !request.getType().trim().isEmpty()) {
@@ -103,8 +114,19 @@ public class ChatService {
         }
         chatMessage.setRead(false);
 
-        // Save ChatMessage in MongoDB
-        ChatMessage saved = chatMessageRepository.save(chatMessage);
+        // Save ChatMessage in MongoDB with atomic duplicate prevention
+        ChatMessage saved;
+        try {
+            saved = chatMessageRepository.save(chatMessage);
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            log.info("🔁 Concurrent duplicate caught for sender {} with clientMessageId: {}. Recovering persisted instance.",
+                    sender, request.getClientMessageId());
+            java.util.Optional<ChatMessage> existing = chatMessageRepository.findBySenderAndClientMessageId(sender, request.getClientMessageId().trim());
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+            throw ex;
+        }
         log.info("💾 MESSAGE SAVED: id={}, sender={}, receiver={}, conversationId={}, status={}",
                 saved.getId(), saved.getSender(), saved.getReceiver(), saved.getConversationId(), saved.getStatus());
 

@@ -107,21 +107,44 @@ public class UserService {
 	}
 
 	public User updateUserData(Long id, User user) {
+		String currentEmail = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication() != null
+				? org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName()
+				: null;
+		if (currentEmail == null || "anonymousUser".equalsIgnoreCase(currentEmail)) {
+			throw new SecurityException("Authentication required to update user data");
+		}
+		User currentUser = userRepository.findByEmail(currentEmail)
+				.orElseThrow(() -> new ResourceNotFoundException("Authenticated user not found"));
+		boolean isAdmin = currentUser.getRole() != null && "ADMIN".equalsIgnoreCase(currentUser.getRole().getRoleName());
+		boolean isSelf = currentUser.getId().equals(id);
+
+		if (!isAdmin && !isSelf) {
+			throw new SecurityException("Unauthorized to update this user profile");
+		}
+
 		User existingUser = userRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("User not found"));
-		existingUser.setName(user.getName());
-		existingUser.setEmail(user.getEmail());
-		existingUser.setPassword(user.getPassword());
 
-		// check role exist if yes then ready to update
-		if (user.getRole() != null) {
-			Role role = roleRepository.findByRoleName(user.getRole().getRoleName())
-					.orElseThrow(() -> new ResourceNotFoundException("User not found"));
-			existingUser.setRole(role);
+		if (user.getName() != null && !user.getName().trim().isEmpty()) {
+			existingUser.setName(user.getName().trim());
+		}
+		if (user.getEmail() != null && !user.getEmail().trim().isEmpty()) {
+			existingUser.setEmail(user.getEmail().trim().toLowerCase(java.util.Locale.ROOT));
+		}
+		if (user.getPassword() != null && !user.getPassword().trim().isEmpty()) {
+			existingUser.setPassword(passwordEncoder.encode(user.getPassword().trim()));
+		}
+
+		// check role exist if yes then ready to update - ONLY ADMIN can change roles
+		if (user.getRole() != null && user.getRole().getRoleName() != null) {
+			if (isAdmin) {
+				Role role = roleRepository.findByRoleName(user.getRole().getRoleName())
+						.orElseThrow(() -> new ResourceNotFoundException("Role not found"));
+				existingUser.setRole(role);
+			}
 		}
 
 		return userRepository.save(existingUser);
-
 	}
 
 	public LoginResponseDto login(LoginRequestDto request) {
@@ -145,7 +168,38 @@ public class UserService {
 	    	    token,
 	    	    user.getName(),
 	    	    user.getRole().getRoleName()
-	    	);	}
+	    	);
+	}
+
+	public UserResponseDto getCurrentUserProfile() {
+		String email = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication() != null
+				? org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName()
+				: null;
+		if (email == null || "anonymousUser".equalsIgnoreCase(email)) {
+			throw new ResourceNotFoundException("No authenticated user found");
+		}
+		User user = userRepository.findByEmail(email.trim().toLowerCase(java.util.Locale.ROOT))
+				.orElseThrow(() -> new ResourceNotFoundException("User not found with email: " + email));
+		return new UserResponseDto(user.getId(), user.getName(), user.getEmail(), user.getRole() != null ? user.getRole().getRoleName() : "USER");
+	}
+
+	public java.util.Map<String, String> refreshToken() {
+		String email = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication() != null
+				? org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName()
+				: null;
+		if (email == null || "anonymousUser".equalsIgnoreCase(email)) {
+			throw new SecurityException("Authentication required to refresh session");
+		}
+		User user = userRepository.findByEmail(email.trim().toLowerCase(java.util.Locale.ROOT))
+				.orElseThrow(() -> new ResourceNotFoundException("User not found with email: " + email));
+		String newToken = jwtUtil.generateToken(user.getEmail());
+		java.util.Map<String, String> response = new java.util.HashMap<>();
+		response.put("token", newToken);
+		response.put("name", user.getName());
+		response.put("role", user.getRole() != null ? user.getRole().getRoleName() : "USER");
+		response.put("email", user.getEmail());
+		return response;
+	}
 	
 	
 	public List<UserResponseDto> searchUsersByName(String name) {
@@ -159,36 +213,12 @@ public class UserService {
 	        .collect(Collectors.toList());
 	}
 
-	private static class OtpData {
-		private final String code;
-		private final long expiryTime;
-
-		public OtpData(String code, long expiryTime) {
-			this.code = code;
-			this.expiryTime = expiryTime;
-		}
-
-		public String getCode() {
-			return code;
-		}
-
-		public boolean isExpired() {
-			return System.currentTimeMillis() > expiryTime;
-		}
-	}
-
-	private final java.util.concurrent.ConcurrentHashMap<String, OtpData> otpStorage = new java.util.concurrent.ConcurrentHashMap<>();
-
 	public java.util.Map<String, String> processForgotPassword(com.alumni.management.user.dto.ForgotPasswordRequestDto request) {
-		User user = userRepository.findByEmail(request.getEmail())
+		String email = request.getEmail() != null ? request.getEmail().toLowerCase().trim() : "";
+		User user = userRepository.findByEmail(email)
 				.orElseThrow(() -> new ResourceNotFoundException("User with email " + request.getEmail() + " not found"));
 
-		String code = String.format("%06d", new java.util.Random().nextInt(900000) + 100000);
-		long expiry = System.currentTimeMillis() + (15 * 60 * 1000); // 15 minutes
-		otpStorage.put(user.getEmail().toLowerCase().trim(), new OtpData(code, expiry));
-
-		// Send real OTP Email
-		emailService.sendOtpEmail(user.getEmail(), code);
+		verificationService.sendVerificationOtp(user.getEmail(), com.alumni.management.verification.enums.VerificationPurpose.PASSWORD_RESET);
 
 		java.util.Map<String, String> response = new java.util.HashMap<>();
 		response.put("message", "OTP sent successfully to your email");
@@ -201,15 +231,10 @@ public class UserService {
 		User user = userRepository.findByEmail(email)
 				.orElseThrow(() -> new ResourceNotFoundException("User with email " + email + " not found"));
 
-		OtpData otpData = otpStorage.get(email);
-		if (otpData == null || otpData.isExpired() || !otpData.getCode().equals(request.getOtp() != null ? request.getOtp().trim() : "")) {
-			throw new RuntimeException("Invalid or expired OTP");
-		}
+		verificationService.verifyOtp(email, request.getOtp() != null ? request.getOtp().trim() : "", com.alumni.management.verification.enums.VerificationPurpose.PASSWORD_RESET);
 
 		user.setPassword(passwordEncoder.encode(request.getNewPassword()));
 		userRepository.save(user);
-
-		otpStorage.remove(email);
 
 		java.util.Map<String, String> response = new java.util.HashMap<>();
 		response.put("message", "Password reset successfully");

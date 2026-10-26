@@ -12,6 +12,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 //	We take email for unique authentication in login we
 //	normally use email and password that why	 
 	Optional<User> findByEmail(String email);
+	Optional<User> findByEmailIgnoreCase(String email);
 	Optional<User> findByUniversityNumber(String universityNumber);
 	
 	List<User> findByRole_RoleName(String roleName);

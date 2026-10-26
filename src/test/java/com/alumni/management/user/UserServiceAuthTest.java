@@ -310,5 +310,94 @@ class UserServiceAuthTest {
         assertEquals("Kathan Student", response.getName());
         assertEquals("STUDENT", response.getRole());
     }
+
+    @Test
+    @DisplayName("getCurrentUserProfile returns user profile attributes safely")
+    void testGetCurrentUserProfile_Success() {
+        User user = new User();
+        user.setId(10L);
+        user.setEmail(testEmail);
+        user.setName("Alice Alumni");
+        user.setRole(alumniRole);
+        user.setUniversityNumber("GLS1234");
+        user.setVerified(true);
+
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(user));
+
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(testEmail, null)
+        );
+
+        com.alumni.management.user.dto.UserResponseDto profile = userService.getCurrentUserProfile();
+
+        assertNotNull(profile);
+        assertEquals(10L, profile.getId());
+        assertEquals("Alice Alumni", profile.getName());
+        assertEquals(testEmail, profile.getEmail());
+        assertEquals("ALUMNI", profile.getRoleName());
+    }
+
+    @Test
+    @DisplayName("refreshToken returns new token and user details")
+    void testRefreshToken_Success() {
+        User user = new User();
+        user.setEmail(testEmail);
+        user.setName("Alice Alumni");
+        user.setRole(alumniRole);
+
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(user));
+        when(jwtUtil.generateToken(testEmail)).thenReturn("refreshed.new.token");
+
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(testEmail, null)
+        );
+
+        java.util.Map<String, String> result = userService.refreshToken();
+
+        assertNotNull(result);
+        assertEquals("refreshed.new.token", result.get("token"));
+        assertEquals("Alice Alumni", result.get("name"));
+        assertEquals("ALUMNI", result.get("role"));
+    }
+
+    @Test
+    @DisplayName("processForgotPassword dispatches OTP via VerificationService")
+    void testProcessForgotPassword_Success() {
+        User user = new User();
+        user.setEmail(testEmail);
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(user));
+
+        com.alumni.management.user.dto.ForgotPasswordRequestDto req = new com.alumni.management.user.dto.ForgotPasswordRequestDto();
+        req.setEmail(testEmail);
+
+        java.util.Map<String, String> response = userService.processForgotPassword(req);
+        assertNotNull(response);
+        assertEquals(testEmail, response.get("email"));
+        verify(verificationService).sendVerificationOtp(testEmail, VerificationPurpose.PASSWORD_RESET);
+    }
+
+    @Test
+    @DisplayName("resetPassword verifies OTP via VerificationService and hashes new password")
+    void testResetPassword_Success() {
+        User user = new User();
+        user.setEmail(testEmail);
+        user.setPassword(passwordEncoder.encode("OldPassword123!"));
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(user));
+
+        com.alumni.management.user.dto.ResetPasswordRequestDto req = new com.alumni.management.user.dto.ResetPasswordRequestDto();
+        req.setEmail(testEmail);
+        req.setOtp("123456");
+        req.setNewPassword("NewSecurePassword456!");
+
+        java.util.Map<String, String> response = userService.resetPassword(req);
+        assertNotNull(response);
+        assertEquals("Password reset successfully", response.get("message"));
+
+        verify(verificationService).verifyOtp(testEmail, "123456", VerificationPurpose.PASSWORD_RESET);
+        verify(userRepository).save(argThat(savedUser ->
+            passwordEncoder.matches("NewSecurePassword456!", savedUser.getPassword())
+        ));
+    }
 }
+
 

@@ -44,6 +44,12 @@ public class AdminServiceTest {
 	@Mock
 	private StudentProfileRepository studentProfileRepository;
 
+	@Mock
+	private com.alumni.management.role.repository.RoleRepository roleRepository;
+
+	@Mock
+	private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+
 	@InjectMocks
 	private AdminService adminService;
 
@@ -152,5 +158,44 @@ public class AdminServiceTest {
 		assertEquals(1, stats.getTotalAlumni());
 		assertEquals(1, stats.getTotalFaculty());
 		assertEquals(1, stats.getTotalStudents());
+	}
+
+	@Test
+	void testDeleteStudentUserCleansUpStudentProfile() {
+		when(userRepository.findById(103L)).thenReturn(Optional.of(studentUser));
+		com.alumni.management.student.entity.StudentProfile profile = new com.alumni.management.student.entity.StudentProfile();
+		profile.setUser(studentUser);
+		when(studentProfileRepository.findByUserId(103L)).thenReturn(Optional.of(profile));
+
+		String message = adminService.deleteUser(103L);
+
+		assertEquals("User deleted successfully", message);
+		verify(studentProfileRepository).delete(profile);
+		verify(userRepository).delete(studentUser);
+	}
+
+	@Test
+	void testCreateStudentUserInitializesStudentProfile() {
+		com.alumni.management.admin.dto.CreateUserRequestDto request = new com.alumni.management.admin.dto.CreateUserRequestDto();
+		request.setName("New Student");
+		request.setEmail("newstudent@example.com");
+		request.setPassword("password123");
+		request.setRoleName("STUDENT");
+		request.setDepartment("MCA");
+
+		when(roleRepository.findByRoleName("STUDENT")).thenReturn(Optional.of(studentRole));
+		when(passwordEncoder.encode("password123")).thenReturn("encodedPassword");
+		when(userRepository.save(org.mockito.ArgumentMatchers.any(User.class))).thenAnswer(invocation -> {
+			User u = invocation.getArgument(0);
+			u.setId(200L);
+			return u;
+		});
+
+		UserResponseDto response = adminService.createUserByAdmin(request);
+
+		assertNotNull(response);
+		assertEquals("New Student", response.getName());
+		assertEquals("STUDENT", response.getRoleName());
+		verify(studentProfileRepository).save(org.mockito.ArgumentMatchers.any(com.alumni.management.student.entity.StudentProfile.class));
 	}
 }

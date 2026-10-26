@@ -18,7 +18,8 @@ import lombok.Setter;
 @Document(collection = "chat_messages")
 @CompoundIndexes({
     @CompoundIndex(name = "conversation_time_idx", def = "{'conversationId': 1, 'timestamp': -1}"),
-    @CompoundIndex(name = "sender_receiver_idx", def = "{'sender': 1, 'receiver': 1}")
+    @CompoundIndex(name = "sender_receiver_idx", def = "{'sender': 1, 'receiver': 1}"),
+    @CompoundIndex(name = "sender_client_msg_unique_idx", def = "{'sender': 1, 'clientMessageId': 1}", unique = true, sparse = true)
 })
 @Getter
 @Setter
@@ -37,6 +38,9 @@ public class ChatMessage {
 
 	@Indexed
 	private String receiver;
+
+	@Indexed
+	private String clientMessageId;
 
 	private String content;
 

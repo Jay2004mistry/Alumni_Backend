@@ -99,6 +99,7 @@ public class JobService {
 			throw new RuntimeException("Only alumni, faculty, and admin can create job posts");
 		}
 //Set the user to the job post
+		job.setId(null);
 		job.setUser(user);
 		jobRepository.save(job);
 

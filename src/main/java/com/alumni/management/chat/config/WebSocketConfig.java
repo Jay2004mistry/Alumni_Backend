@@ -34,6 +34,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 	@Autowired
 	private CustomUserDetailsService userDetailsService;
 
+	@org.springframework.beans.factory.annotation.Value("${cors.allowed.origins:http://localhost:*,http://127.0.0.1:*,http://10.0.2.2:*,http://192.168.*}")
+	private String allowedOrigins;
+
 	@Override
 	public void configureMessageBroker(MessageBrokerRegistry config) {
 		config.enableSimpleBroker("/queue", "/topic");
@@ -43,11 +46,15 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
 	@Override
 	public void registerStompEndpoints(StompEndpointRegistry registry) {
+		String[] origins = java.util.Arrays.stream(allowedOrigins.split(","))
+				.map(String::trim)
+				.filter(s -> !s.isEmpty())
+				.toArray(String[]::new);
 		registry.addEndpoint("/chat")
-				.setAllowedOriginPatterns("*")
+				.setAllowedOriginPatterns(origins)
 				.withSockJS();
 		registry.addEndpoint("/chat")
-				.setAllowedOriginPatterns("*");
+				.setAllowedOriginPatterns(origins);
 	}
 
 	@Override
@@ -99,9 +106,13 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 						throw new MessageDeliveryException("Unauthorized: Authentication required to subscribe");
 					}
 					String destination = accessor.getDestination();
-					if (destination != null && (destination.equals("/topic/presence") || destination.startsWith("/topic/presence/"))) {
-						log.warn("⚠️ STOMP SUBSCRIBE FORBIDDEN TOPIC: user={}, destination={}", accessor.getUser().getName(), destination);
+					if ("/topic/presence".equals(destination)) {
+						log.warn("⚠️ STOMP SUBSCRIBE FORBIDDEN DESTINATION: user={}, destination={}", accessor.getUser().getName(), destination);
 						throw new MessageDeliveryException("Forbidden: Global presence topic is disabled. Subscribe to /user/queue/presence");
+					}
+					if (destination == null || !destination.startsWith("/user/queue/")) {
+						log.warn("⚠️ STOMP SUBSCRIBE FORBIDDEN DESTINATION: user={}, destination={}", accessor.getUser().getName(), destination);
+						throw new MessageDeliveryException("Forbidden: Only private /user/queue/ destinations are permitted for subscription");
 					}
 					log.info("👂 STOMP SUBSCRIBE: user={}, destination={}",
 							accessor.getUser().getName(),

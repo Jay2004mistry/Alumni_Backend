@@ -24,4 +24,8 @@ public interface ChatMessageRepository extends MongoRepository<ChatMessage, Stri
 	List<ChatMessage> findBySenderIgnoreCaseAndReceiverIgnoreCaseAndStatus(String sender, String receiver, MessageStatus status);
 
 	List<ChatMessage> findByReceiverIgnoreCaseAndStatus(String receiver, MessageStatus status);
+
+	java.util.Optional<ChatMessage> findByClientMessageId(String clientMessageId);
+
+	java.util.Optional<ChatMessage> findBySenderAndClientMessageId(String sender, String clientMessageId);
 }

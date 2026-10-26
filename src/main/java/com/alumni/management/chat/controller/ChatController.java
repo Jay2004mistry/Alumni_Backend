@@ -75,12 +75,24 @@ public class ChatController {
 	@GetMapping("/history/{receiverEmail}")
 	public List<ChatMessage> getChatHistory(Principal principal, @PathVariable String receiverEmail) {
 		String authEmail = getCurrentUserEmail(principal);
+		if (authEmail.isEmpty()) {
+			throw new SecurityException("Authentication required to access chat history");
+		}
+		if (receiverEmail == null || receiverEmail.trim().isEmpty() || authEmail.equalsIgnoreCase(receiverEmail.trim())) {
+			throw new IllegalArgumentException("Invalid conversation partner email");
+		}
 		return chatService.getChatHistory(authEmail, receiverEmail);
 	}
 
 	@PostMapping("/mark-read/{senderEmail}")
 	public Map<String, String> markRead(Principal principal, @PathVariable String senderEmail) {
 		String authEmail = getCurrentUserEmail(principal);
+		if (authEmail.isEmpty()) {
+			throw new SecurityException("Authentication required to mark messages as read");
+		}
+		if (senderEmail == null || senderEmail.trim().isEmpty()) {
+			throw new IllegalArgumentException("Sender email required");
+		}
 		chatService.markMessagesAsRead(authEmail, senderEmail);
 		Map<String, String> response = new HashMap<>();
 		response.put("status", "success");

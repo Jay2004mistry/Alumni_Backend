@@ -14,4 +14,5 @@ public class ChatSendRequest {
     private String content;
     private String type;
     private String timestamp;
+    private String clientMessageId;
 }
