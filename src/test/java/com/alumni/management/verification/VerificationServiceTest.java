@@ -205,7 +205,7 @@ class VerificationServiceTest {
 
         assertTrue(ex.getMessage().contains("3 attempts remaining"));
         assertEquals(2, verification.getAttempts());
-        verify(verificationRepository).save(verification);
+        verify(verificationRepository).saveAndFlush(verification);
         verify(userRepository, never()).save(any());
     }
 
@@ -230,7 +230,7 @@ class VerificationServiceTest {
         );
 
         assertEquals(5, verification.getAttempts());
-        verify(verificationRepository).save(verification);
+        verify(verificationRepository).saveAndFlush(verification);
     }
 
     @Test
