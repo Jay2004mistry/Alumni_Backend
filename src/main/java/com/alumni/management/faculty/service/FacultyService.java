@@ -25,7 +25,7 @@ public class FacultyService {
 
 	private User getCurrentUser() {
 		String email = SecurityContextHolder.getContext().getAuthentication().getName();
-		return userRepository.findByEmail(email).orElseThrow(() -> new RuntimeException("User not found"));
+		return userRepository.findByEmail(email).orElseThrow(() -> new ResourceNotFoundException("User not found"));
 	}
 
 	public String createFacultyProfile(FacultyProfile facultyProfile) {
@@ -67,12 +67,12 @@ public class FacultyService {
 		FacultyProfileDto dto = new FacultyProfileDto(
 				profile.getUser().getId(),
 				profile.getUser().getName(),
-				profile.getDepartment(), 
-				profile.getDesignation(), 
-				profile.getQualification(),
+				profile.getDepartment() != null ? profile.getDepartment() : "MCA", 
+				profile.getDesignation() != null ? profile.getDesignation() : "Faculty Member", 
+				profile.getQualification() != null ? profile.getQualification() : "MCA / Ph.D.",
 				profile.getSpecialization(), 
 				profile.getExperienceYears(), 
-				profile.getEmail(),
+				profile.getEmail() != null ? profile.getEmail() : profile.getUser().getEmail(),
 				profile.getContactNumber(), 
 				profile.getResearchInterests(), 
 				profile.getBio(), 
@@ -93,7 +93,14 @@ public class FacultyService {
 	public FacultyProfileDto getFacultyProfile() {
 		User user = getCurrentUser();
 		FacultyProfile profile = facultyRepository.findByUserId(user.getId())
-				.orElseThrow(() -> new ResourceNotFoundException("Faculty profile not found"));
+				.orElseGet(() -> {
+					FacultyProfile fp = new FacultyProfile();
+					fp.setUser(user);
+					fp.setDepartment("MCA");
+					fp.setDesignation("Faculty Member");
+					fp.setEmail(user.getEmail());
+					return facultyRepository.save(fp);
+				});
 
 		return convertToDto(profile);
 	}
@@ -104,7 +111,16 @@ public class FacultyService {
 
 	public FacultyProfileDto getFacultyProfileByUserId(Long userId) {
 		FacultyProfile profile = facultyRepository.findByUserId(userId)
-				.orElseThrow(() -> new ResourceNotFoundException("Faculty profile not found for user: " + userId));
+				.orElseGet(() -> {
+					User user = userRepository.findById(userId)
+							.orElseThrow(() -> new ResourceNotFoundException("Faculty profile not found for user: " + userId));
+					FacultyProfile fp = new FacultyProfile();
+					fp.setUser(user);
+					fp.setDepartment("MCA");
+					fp.setDesignation("Faculty Member");
+					fp.setEmail(user.getEmail());
+					return facultyRepository.save(fp);
+				});
 		return convertToDto(profile);
 	}
 

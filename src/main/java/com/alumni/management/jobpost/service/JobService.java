@@ -42,6 +42,7 @@ public class JobService {
 	private JobDto convertToDto(Job job) {
 		String posterDepartment = "N/A";
 		String posterBatchYear = "N/A";
+		String photoUrl = null;
 
 		if (job.getUser() != null) {
 			Long userId = job.getUser().getId();
@@ -51,6 +52,7 @@ public class JobService {
 					java.util.Optional<com.alumni.management.alumni.entity.AlumniProfile> alumniProfileOpt = alumniProfileRepository.findByUserId(userId);
 					if (alumniProfileOpt.isPresent()) {
 						com.alumni.management.alumni.entity.AlumniProfile profile = alumniProfileOpt.get();
+						photoUrl = profile.getProfilePictureUrl();
 						if (profile.getDepartment() != null && !profile.getDepartment().isEmpty()) {
 							posterDepartment = profile.getDepartment();
 						}
@@ -62,6 +64,7 @@ public class JobService {
 					java.util.Optional<com.alumni.management.faculty.entity.FacultyProfile> facultyProfileOpt = facultyRepository.findByUserId(userId);
 					if (facultyProfileOpt.isPresent()) {
 						com.alumni.management.faculty.entity.FacultyProfile profile = facultyProfileOpt.get();
+						photoUrl = profile.getProfilePictureUrl();
 						if (profile.getDepartment() != null && !profile.getDepartment().isEmpty()) {
 							posterDepartment = profile.getDepartment();
 						}
@@ -78,10 +81,12 @@ public class JobService {
 			}
 		}
 
-		return new JobDto(job.getId(), job.getUser().getId(), job.getUser().getName(), job.getUser().getEmail(), job.getCompanyName(), job.getJobTitle(),
+		JobDto dto = new JobDto(job.getId(), job.getUser().getId(), job.getUser().getName(), job.getUser().getEmail(), job.getCompanyName(), job.getJobTitle(),
 				job.getLocation(), job.getSalary(), job.getJobDescription(), job.getSkillsRequired(),
 				job.getExperienceRequired(), job.getJoiningType(), job.getJobType(), job.getLastDateToApply(),
 				job.getCompanyLink(), job.getCompanyEmail(), posterDepartment, posterBatchYear);
+		dto.setPhotoUrl(photoUrl);
+		return dto;
 	}
 
 	/**

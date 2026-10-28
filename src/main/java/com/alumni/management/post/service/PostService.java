@@ -1,6 +1,5 @@
 package com.alumni.management.post.service;
 
-import java.io.File;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -46,6 +45,7 @@ public class PostService {
 	private PostDto convertToDto(Post post) {
 		String department = "N/A";
 		String designation = "N/A";
+		String userPhotoUrl = null;
 
 		if (post.getUser() != null) {
 			Long userId = post.getUser().getId();
@@ -55,6 +55,7 @@ public class PostService {
 					java.util.Optional<com.alumni.management.alumni.entity.AlumniProfile> alumniProfileOpt = alumniProfileRepository.findByUserId(userId);
 					if (alumniProfileOpt.isPresent()) {
 						com.alumni.management.alumni.entity.AlumniProfile profile = alumniProfileOpt.get();
+						userPhotoUrl = profile.getProfilePictureUrl();
 						if (profile.getDepartment() != null) department = profile.getDepartment();
 						if (profile.getBatchYear() != null) designation = "Class of " + profile.getBatchYear();
 					}
@@ -62,6 +63,7 @@ public class PostService {
 					java.util.Optional<com.alumni.management.faculty.entity.FacultyProfile> facultyProfileOpt = facultyRepository.findByUserId(userId);
 					if (facultyProfileOpt.isPresent()) {
 						com.alumni.management.faculty.entity.FacultyProfile profile = facultyProfileOpt.get();
+						userPhotoUrl = profile.getProfilePictureUrl();
 						if (profile.getDepartment() != null) department = profile.getDepartment();
 						if (profile.getDesignation() != null) designation = profile.getDesignation();
 					}
@@ -70,6 +72,7 @@ public class PostService {
 						java.util.Optional<com.alumni.management.student.entity.StudentProfile> spOpt = studentProfileRepository.findByUserId(userId);
 						if (spOpt.isPresent()) {
 							com.alumni.management.student.entity.StudentProfile profile = spOpt.get();
+							userPhotoUrl = profile.getProfilePictureUrl();
 							if (profile.getDepartment() != null && !profile.getDepartment().isEmpty()) department = profile.getDepartment();
 							if (profile.getBatchYear() != null) designation = "Class of " + profile.getBatchYear();
 							else designation = "Student";
@@ -96,7 +99,8 @@ public class PostService {
 				post.getUser().getEmail(),
 				post.getUser().getRole() != null ? post.getUser().getRole().getRoleName() : "USER",
 				department,
-				designation
+				designation,
+				userPhotoUrl
 		);
 	}
 

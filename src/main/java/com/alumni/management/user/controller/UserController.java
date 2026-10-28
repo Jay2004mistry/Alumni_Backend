@@ -77,7 +77,7 @@ public class UserController {
 	@PostMapping("/profile-image")
 	public java.util.Map<String, String> uploadProfileImage(@org.springframework.web.bind.annotation.RequestParam("image") org.springframework.web.multipart.MultipartFile image) {
 		try {
-			String url = com.alumni.management.security.FileUploadSecurityUtil.saveImageSafely(image, "uploads/profiles/");
+			String url = userService.uploadProfileImage(image);
 			java.util.Map<String, String> res = new java.util.HashMap<>();
 			res.put("url", url);
 			return res;

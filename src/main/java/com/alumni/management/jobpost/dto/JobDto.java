@@ -24,6 +24,7 @@ public class JobDto {
 	private String companyEmail;
 	private String posterDepartment;
 	private String posterBatchYear;
+	private String photoUrl;
 
 	public JobDto(Long id, long userId, String userName, String userEmail, String companyName, String jobTitle, String location, String salary,
 			String jobDescription, String skillsRequired, String experienceRequired, String joiningType, String jobType,
@@ -199,7 +200,7 @@ public class JobDto {
 		return id;
 	}
 
-	public void setId(Long id) {
+	public String getPhotoUrl() { return photoUrl; } public void setPhotoUrl(String photoUrl) { this.photoUrl = photoUrl; } public void setId(Long id) {
 		this.id = id;
 	}
 

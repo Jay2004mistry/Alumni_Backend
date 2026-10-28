@@ -1,7 +1,7 @@
 package com.alumni.management.chat.config;
 
 import java.security.Principal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,7 +32,7 @@ public class PresenceEventListener {
     private com.alumni.management.chat.service.ChatService chatService;
 
     private static final Map<String, Set<String>> userSessions = new ConcurrentHashMap<>();
-    private static final Map<String, LocalDateTime> userLastSeen = new ConcurrentHashMap<>();
+    private static final Map<String, Instant> userLastSeen = new ConcurrentHashMap<>();
 
     @EventListener
     public void handleWebSocketConnectListener(SessionConnectedEvent event) {
@@ -51,7 +51,7 @@ public class PresenceEventListener {
             log.info("🟢 USER CONNECTED: email={}, sessionId={}, activeSessions={}", email, sessionId, sessions.size());
 
             if (wasOffline) {
-                PresenceEvent presence = new PresenceEvent(email, "ONLINE", chatClock.now());
+                PresenceEvent presence = new PresenceEvent(email, "ONLINE", chatClock.nowInstant());
                 dispatchPresenceToPartners(email, presence);
             }
         }
@@ -70,7 +70,7 @@ public class PresenceEventListener {
                 log.info("🔴 USER DISCONNECTED: email={}, sessionId={}, remainingSessions={}", email, sessionId, sessions.size());
                 if (sessions.isEmpty()) {
                     userSessions.remove(email);
-                    LocalDateTime now = chatClock.now();
+                    Instant now = chatClock.nowInstant();
                     userLastSeen.put(email, now);
                     PresenceEvent presence = new PresenceEvent(email, "OFFLINE", now);
                     dispatchPresenceToPartners(email, presence);
@@ -103,7 +103,7 @@ public class PresenceEventListener {
         return sessions != null && !sessions.isEmpty();
     }
 
-    public static LocalDateTime getLastSeen(String email) {
+    public static Instant getLastSeen(String email) {
         if (email == null) return null;
         return userLastSeen.get(email.trim().toLowerCase());
     }

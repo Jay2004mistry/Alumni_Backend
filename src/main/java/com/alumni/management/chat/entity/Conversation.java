@@ -1,12 +1,14 @@
 package com.alumni.management.chat.entity;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -29,14 +31,19 @@ public class Conversation {
     private String lastMessage;
     private String lastMessageSender;
     private MessageStatus lastMessageStatus;
-    private LocalDateTime lastMessageAt;
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private Instant lastMessageAt;
 
     private List<ParticipantUnread> unreadCounts = new ArrayList<>();
 
     private String encryptionKey;
 
-    private LocalDateTime createdAt = LocalDateTime.now();
-    private LocalDateTime updatedAt = LocalDateTime.now();
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private Instant createdAt = Instant.now();
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private Instant updatedAt = Instant.now();
 
     public static String generateConversationId(String user1, String user2) {
         String u1 = user1 != null ? user1.trim().toLowerCase() : "";

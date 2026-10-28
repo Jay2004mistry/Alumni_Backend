@@ -1,6 +1,6 @@
 package com.alumni.management.chat.entity;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
@@ -8,6 +8,7 @@ import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.AllArgsConstructor;
@@ -48,9 +49,11 @@ public class ChatMessage {
 
 	private MessageStatus status = MessageStatus.SENT;
 
-	private LocalDateTime timestamp = LocalDateTime.now();
+	@JsonFormat(shape = JsonFormat.Shape.STRING)
+	private Instant timestamp = Instant.now();
 
-	private LocalDateTime updatedAt;
+	@JsonFormat(shape = JsonFormat.Shape.STRING)
+	private Instant updatedAt;
 
 	@JsonProperty("isRead")
 	private boolean isRead = false;

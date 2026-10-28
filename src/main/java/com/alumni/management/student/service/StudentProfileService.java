@@ -53,29 +53,17 @@ public class StudentProfileService {
 
 	public StudentProfileDto getProfile() {
 		User user = getCurrentUser();
-		Optional<StudentProfile> opt = profileRepository.findByUserId(user.getId());
-		if (opt.isPresent()) {
-			return convertToDto(opt.get());
-		}
-		// Return initialized profile with user details if not yet saved
-		return new StudentProfileDto(
-				user.getId(),
-				user.getName(),
-				user.getEmail(),
-				user.getUniversityNumber(),
-				"MCA",
-				"Master of Computer Applications",
-				null,
-				"Semester 4",
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
-				null
-		);
+		StudentProfile profile = profileRepository.findByUserId(user.getId())
+				.orElseGet(() -> {
+					StudentProfile sp = new StudentProfile();
+					sp.setUser(user);
+					sp.setDepartment("MCA");
+					sp.setDegree("Master of Computer Applications");
+					sp.setSemester("Semester 4");
+					StudentProfile saved = profileRepository.save(sp);
+					return saved != null ? saved : sp;
+				});
+		return convertToDto(profile);
 	}
 
 	@Transactional
@@ -111,7 +99,17 @@ public class StudentProfileService {
 
 	public StudentProfileDto getProfileByUserId(Long userId) {
 		StudentProfile profile = profileRepository.findByUserId(userId)
-				.orElseThrow(() -> new ResourceNotFoundException("Student profile not found for user id " + userId));
+				.orElseGet(() -> {
+					User user = userRepository.findById(userId)
+							.orElseThrow(() -> new ResourceNotFoundException("User not found with id " + userId));
+					StudentProfile sp = new StudentProfile();
+					sp.setUser(user);
+					sp.setDepartment("MCA");
+					sp.setDegree("Master of Computer Applications");
+					sp.setSemester("Semester 4");
+					StudentProfile saved = profileRepository.save(sp);
+					return saved != null ? saved : sp;
+				});
 		return convertToDto(profile);
 	}
 

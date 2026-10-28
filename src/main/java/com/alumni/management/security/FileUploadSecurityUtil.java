@@ -1,7 +1,8 @@
 package com.alumni.management.security;
 
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
@@ -14,6 +15,39 @@ public class FileUploadSecurityUtil {
     private static final List<String> ALLOWED_IMAGE_EXTENSIONS = Arrays.asList(
             ".jpg", ".jpeg", ".png", ".webp", ".gif"
     );
+
+    public static Path getUploadRoot() {
+        String configuredRoot = System.getenv("APP_UPLOAD_DIR");
+        if (configuredRoot != null && !configuredRoot.trim().isEmpty()) {
+            return Paths.get(configuredRoot.trim()).toAbsolutePath().normalize();
+        }
+        return Paths.get(
+                System.getProperty("user.home"),
+                "alumni-connect-uploads"
+        ).toAbsolutePath().normalize();
+    }
+
+    public static void deleteImageSafely(String relativeUrl) {
+        if (relativeUrl == null || relativeUrl.trim().isEmpty()) {
+            return;
+        }
+        try {
+            String clean = relativeUrl.trim().replace('\\', '/');
+            if (clean.startsWith("/")) {
+                clean = clean.substring(1);
+            }
+            if (!clean.startsWith("uploads/")) {
+                return;
+            }
+            Path uploadRoot = getUploadRoot();
+            Path targetFile = uploadRoot.resolve(clean).normalize();
+            if (targetFile.startsWith(uploadRoot) && Files.isRegularFile(targetFile)) {
+                Files.deleteIfExists(targetFile);
+            }
+        } catch (Exception ignored) {
+            // Failure to delete old photo should not abort upload operation
+        }
+    }
 
     /**
      * Validates and saves an uploaded image safely to the target directory.
@@ -68,29 +102,57 @@ public class FileUploadSecurityUtil {
                 throw new SecurityException("Invalid image content: magic byte signature does not match declared image format");
             }
         }
-        File targetDirectory = new File(baseDir);
-        if (!targetDirectory.exists()) {
-            targetDirectory.mkdirs();
+
+        // Resolve the upload root from configuration.
+        // APP_UPLOAD_DIR must be an absolute directory path in production.
+        Path uploadRoot = getUploadRoot();
+
+        // Resolve the requested directory safely beneath the configured root.
+        Path relativeDirectory = Paths.get(baseDir).normalize();
+
+        if (relativeDirectory.isAbsolute() ||
+                relativeDirectory.startsWith("..")) {
+            throw new SecurityException("Invalid upload directory");
         }
 
-        // Generate safe unique filename
-        String safeFileName = System.currentTimeMillis() + "_" + UUID.randomUUID().toString().substring(0, 8) + extension;
-        File destinationFile = new File(targetDirectory, safeFileName);
+        Path targetDirectory = uploadRoot.resolve(relativeDirectory).normalize();
 
-        // Verify canonical path containment (anti-path traversal)
-        String canonicalDest = destinationFile.getCanonicalPath();
-        String canonicalDir = targetDirectory.getCanonicalPath();
-        if (!canonicalDest.startsWith(canonicalDir + File.separator)) {
+        if (!targetDirectory.startsWith(uploadRoot)) {
+            throw new SecurityException("Invalid upload directory");
+        }
+
+        // Create the directory and fail explicitly if it cannot be created.
+        Files.createDirectories(targetDirectory);
+
+        if (!Files.isDirectory(targetDirectory) ||
+                !Files.isWritable(targetDirectory)) {
+            throw new IOException("Upload directory is not writable");
+        }
+
+        // Generate a unique filename.
+        String safeFileName = System.currentTimeMillis() + "_"
+                + UUID.randomUUID().toString().substring(0, 8)
+                + extension;
+
+        Path destination = targetDirectory.resolve(safeFileName).normalize();
+
+        // Final path containment check.
+        if (!destination.startsWith(targetDirectory)) {
             throw new SecurityException("Potential path traversal attempt detected");
         }
 
-        image.transferTo(destinationFile);
+        // Save the uploaded image.
+        image.transferTo(destination);
 
-        // Normalize return URL
-        String normalizedDir = baseDir.startsWith("/") ? baseDir : "/" + baseDir;
+        // Return the same URL format as before.
+        String normalizedDir = baseDir.replace('\\', '/');
+        if (!normalizedDir.startsWith("/")) {
+            normalizedDir = "/" + normalizedDir;
+        }
         if (!normalizedDir.endsWith("/")) {
             normalizedDir += "/";
         }
+
         return normalizedDir + safeFileName;
     }
 

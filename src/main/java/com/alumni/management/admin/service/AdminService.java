@@ -83,6 +83,27 @@ public class AdminService {
 		return "MCA"; // Default department
 	}
 
+	private String getUserProfilePicture(User user) {
+		if (user == null || user.getId() == null || user.getRole() == null) {
+			return null;
+		}
+		String role = user.getRole().getRoleName() != null ? user.getRole().getRoleName().toUpperCase() : "";
+		if ("ALUMNI".equals(role) && alumniProfileRepository != null) {
+			return alumniProfileRepository.findByUserId(user.getId())
+					.map(AlumniProfile::getProfilePictureUrl)
+					.orElse(null);
+		} else if ("FACULTY".equals(role) && facultyRepository != null) {
+			return facultyRepository.findByUserId(user.getId())
+					.map(FacultyProfile::getProfilePictureUrl)
+					.orElse(null);
+		} else if ("STUDENT".equals(role) && studentProfileRepository != null) {
+			return studentProfileRepository.findByUserId(user.getId())
+					.map(com.alumni.management.student.entity.StudentProfile::getProfilePictureUrl)
+					.orElse(null);
+		}
+		return null;
+	}
+
 	public List<UserResponseDto> getAllUsers() {
 		List<User> users = userRepository.findAll();
 		return users.stream()
@@ -92,7 +113,8 @@ public class AdminService {
 						user.getName(),
 						user.getEmail(),
 						user.getRole() != null ? user.getRole().getRoleName() : "USER",
-						getUserDepartment(user)
+						getUserDepartment(user),
+						getUserProfilePicture(user)
 				)).collect(Collectors.toList());
 	}
 
@@ -111,7 +133,8 @@ public class AdminService {
 						user.getName(),
 						user.getEmail(),
 						user.getRole() != null ? user.getRole().getRoleName() : "USER",
-						getUserDepartment(user)
+						getUserDepartment(user),
+						getUserProfilePicture(user)
 				)).collect(Collectors.toList());
 	}
 
@@ -211,14 +234,21 @@ public class AdminService {
 		return "User deleted successfully";
 	}
 
+	@Transactional
 	public UserResponseDto createUserByAdmin(CreateUserRequestDto request) {
 		String roleStr = request.getRoleName() != null ? request.getRoleName().toUpperCase() : "USER";
 		Role role = roleRepository.findByRoleName(roleStr)
 				.orElseThrow(() -> new ResourceNotFoundException("Role " + roleStr + " not found"));
 
+		String normalizedEmail = request.getEmail() != null ? request.getEmail().trim().toLowerCase(java.util.Locale.ROOT) : "";
+		if (userRepository.findByEmail(normalizedEmail).isPresent()) {
+			throw new com.alumni.management.verification.exception.UserAlreadyExistsException(
+					"A user with email " + normalizedEmail + " already exists.");
+		}
+
 		User user = new User();
 		user.setName(request.getName());
-		user.setEmail(request.getEmail());
+		user.setEmail(normalizedEmail);
 		user.setPassword(passwordEncoder.encode(request.getPassword()));
 		user.setRole(role);
 

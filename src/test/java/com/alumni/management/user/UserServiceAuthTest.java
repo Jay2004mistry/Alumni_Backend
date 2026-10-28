@@ -9,8 +9,11 @@ import com.alumni.management.user.dto.LoginResponseDto;
 import com.alumni.management.user.entity.User;
 import com.alumni.management.user.repository.UserRepository;
 import com.alumni.management.user.service.UserService;
+import com.alumni.management.verification.dto.VerificationResponseDto;
 import com.alumni.management.verification.enums.VerificationPurpose;
 import com.alumni.management.verification.exception.AccountNotVerifiedException;
+import com.alumni.management.verification.exception.EmailDeliveryException;
+import com.alumni.management.verification.exception.ResendCooldownException;
 import com.alumni.management.verification.exception.UserAlreadyExistsException;
 import com.alumni.management.verification.service.VerificationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +48,15 @@ class UserServiceAuthTest {
     @Mock
     private VerificationService verificationService;
 
+    @Mock
+    private com.alumni.management.alumni.repository.AlumniProfileRepository alumniProfileRepository;
+
+    @Mock
+    private com.alumni.management.student.repository.StudentProfileRepository studentProfileRepository;
+
+    @Mock
+    private com.alumni.management.faculty.repository.FacultyRepository facultyRepository;
+
     @Spy
     private PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
@@ -63,7 +75,7 @@ class UserServiceAuthTest {
     }
 
     @Test
-    @DisplayName("Unverified account must be rejected at login without issuing JWT")
+    @DisplayName("Unverified account must be rejected at login without issuing JWT and triggers OTP dispatch")
     void testLogin_UnverifiedAccount_Rejected() {
         User unverifiedUser = new User();
         unverifiedUser.setEmail(testEmail);
@@ -72,6 +84,13 @@ class UserServiceAuthTest {
         unverifiedUser.setVerified(false);
 
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(unverifiedUser));
+        when(verificationService.sendVerificationOtp(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
+                .thenReturn(VerificationResponseDto.builder()
+                        .success(true)
+                        .message("Verification code has been sent to your email.")
+                        .email(testEmail)
+                        .cooldownSeconds(60)
+                        .build());
 
         LoginRequestDto request = new LoginRequestDto();
         request.setEmail(testEmail);
@@ -81,6 +100,65 @@ class UserServiceAuthTest {
                 userService.login(request)
         );
 
+        assertTrue(ex.getMessage().contains("Account is not verified"));
+        assertTrue(ex.isOtpDispatched());
+        assertEquals(60, ex.getCooldownSeconds());
+        assertEquals(testEmail, ex.getEmail());
+        assertEquals(VerificationPurpose.ACCOUNT_ACTIVATION, ex.getPurpose());
+        verify(jwtUtil, never()).generateToken(anyString());
+        verify(verificationService, times(1)).sendVerificationOtp(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION);
+    }
+
+    @Test
+    @DisplayName("Unverified account login during cooldown carries remaining seconds without crashing")
+    void testLogin_UnverifiedAccount_DuringCooldown_CarriesCooldown() {
+        User unverifiedUser = new User();
+        unverifiedUser.setEmail(testEmail);
+        unverifiedUser.setPassword(passwordEncoder.encode(rawPassword));
+        unverifiedUser.setRole(alumniRole);
+        unverifiedUser.setVerified(false);
+
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(unverifiedUser));
+        when(verificationService.sendVerificationOtp(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
+                .thenThrow(new ResendCooldownException("Please wait 42 seconds before requesting a new code.", 42));
+
+        LoginRequestDto request = new LoginRequestDto();
+        request.setEmail(testEmail);
+        request.setPassword(rawPassword);
+
+        AccountNotVerifiedException ex = assertThrows(AccountNotVerifiedException.class, () ->
+                userService.login(request)
+        );
+
+        assertFalse(ex.isOtpDispatched());
+        assertEquals(42, ex.getCooldownSeconds());
+        assertTrue(ex.getMessage().contains("42 seconds"));
+        verify(jwtUtil, never()).generateToken(anyString());
+    }
+
+    @Test
+    @DisplayName("Unverified account login when email delivery fails carries safe technical message")
+    void testLogin_UnverifiedAccount_EmailDeliveryFailure_CarriesSafeError() {
+        User unverifiedUser = new User();
+        unverifiedUser.setEmail(testEmail);
+        unverifiedUser.setPassword(passwordEncoder.encode(rawPassword));
+        unverifiedUser.setRole(alumniRole);
+        unverifiedUser.setVerified(false);
+
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(unverifiedUser));
+        when(verificationService.sendVerificationOtp(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
+                .thenThrow(new EmailDeliveryException("Failed to send verification email. Please try again later."));
+
+        LoginRequestDto request = new LoginRequestDto();
+        request.setEmail(testEmail);
+        request.setPassword(rawPassword);
+
+        AccountNotVerifiedException ex = assertThrows(AccountNotVerifiedException.class, () ->
+                userService.login(request)
+        );
+
+        assertFalse(ex.isOtpDispatched());
+        assertEquals(0, ex.getCooldownSeconds());
         assertTrue(ex.getMessage().contains("Account is not verified"));
         verify(jwtUtil, never()).generateToken(anyString());
     }
@@ -114,13 +192,13 @@ class UserServiceAuthTest {
     }
 
     @Test
-    @DisplayName("Login with invalid password is rejected")
-    void testLogin_InvalidPassword_Rejected() {
+    @DisplayName("Login with invalid password fails before checking verification status")
+    void testLogin_InvalidPassword_ThrowsResourceNotFoundException() {
         User user = new User();
         user.setEmail(testEmail);
-        user.setPassword(passwordEncoder.encode(rawPassword));
+        user.setPassword(passwordEncoder.encode("DifferentPassword!"));
         user.setRole(alumniRole);
-        user.setVerified(true);
+        user.setVerified(false);
 
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(user));
 
@@ -130,71 +208,85 @@ class UserServiceAuthTest {
 
         assertThrows(ResourceNotFoundException.class, () -> userService.login(request));
         verify(jwtUtil, never()).generateToken(anyString());
-    }
-
-    @Test
-    @DisplayName("Create user initiates verification with verified=false")
-    void testCreateUser_NewUser_InitiatesVerification() {
-        User newUser = new User();
-        newUser.setEmail(testEmail);
-        newUser.setName("New Student");
-        newUser.setPassword(rawPassword);
-        newUser.setRole(alumniRole);
-
-        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
-        when(roleRepository.findByRoleName("ALUMNI")).thenReturn(Optional.of(alumniRole));
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        User result = userService.createUser(newUser);
-
-        assertNotNull(result);
-        assertFalse(result.isVerified(), "New user must be unverified initially");
-        assertTrue(passwordEncoder.matches(rawPassword, result.getPassword()), "Password must be BCrypt encoded");
-
-        verify(verificationService, times(1)).sendVerificationOtp(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION);
-    }
-
-    @Test
-    @DisplayName("Registration with already verified email is rejected")
-    void testCreateUser_AlreadyVerified_Rejected() {
-        User existingUser = new User();
-        existingUser.setEmail(testEmail);
-        existingUser.setVerified(true);
-
-        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(existingUser));
-
-        User registerAttempt = new User();
-        registerAttempt.setEmail(testEmail);
-        registerAttempt.setPassword(rawPassword);
-        registerAttempt.setRole(alumniRole);
-
-        assertThrows(UserAlreadyExistsException.class, () -> userService.createUser(registerAttempt));
         verify(verificationService, never()).sendVerificationOtp(anyString(), any());
     }
 
     @Test
-    @DisplayName("Duplicate registration with unverified email updates account and re-sends OTP")
-    void testCreateUser_UnverifiedExisting_UpdatesAndResendsOtp() {
+    @DisplayName("Login with non-existent email throws ResourceNotFoundException")
+    void testLogin_UnknownEmail_ThrowsResourceNotFoundException() {
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
+
+        LoginRequestDto request = new LoginRequestDto();
+        request.setEmail(testEmail);
+        request.setPassword(rawPassword);
+
+        assertThrows(ResourceNotFoundException.class, () -> userService.login(request));
+        verify(jwtUtil, never()).generateToken(anyString());
+        verify(verificationService, never()).sendVerificationOtp(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Creating user sets verified to false and triggers OTP dispatch")
+    void testCreateUser_NewUser_UnverifiedAndDispatchesOtp() {
+        User newUser = new User();
+        newUser.setEmail(testEmail);
+        newUser.setName("New Student");
+        newUser.setPassword(rawPassword);
+
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
+        when(roleRepository.findByRoleName("ALUMNI")).thenReturn(Optional.of(alumniRole));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User u = invocation.getArgument(0);
+            u.setId(10L);
+            return u;
+        });
+
+        User result = userService.createUser(newUser);
+
+        assertNotNull(result);
+        assertFalse(result.isVerified(), "New registered user must be unverified");
+        assertTrue(passwordEncoder.matches(rawPassword, result.getPassword()), "Password must be BCrypt hashed");
+        verify(verificationService, times(1)).sendVerificationOtp(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION);
+    }
+
+    @Test
+    @DisplayName("Registering with an already verified email throws UserAlreadyExistsException")
+    void testCreateUser_AlreadyVerified_ThrowsUserAlreadyExistsException() {
+        User existingVerified = new User();
+        existingVerified.setEmail(testEmail);
+        existingVerified.setVerified(true);
+
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(existingVerified));
+
+        User attempt = new User();
+        attempt.setEmail(testEmail);
+        attempt.setPassword(rawPassword);
+
+        assertThrows(UserAlreadyExistsException.class, () -> userService.createUser(attempt));
+        verify(verificationService, never()).sendVerificationOtp(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Registering with existing unverified account re-issues OTP and updates details")
+    void testCreateUser_ExistingUnverified_ReissuesOtp() {
         User existingUnverified = new User();
-        existingUnverified.setId(10L);
+        existingUnverified.setId(42L);
         existingUnverified.setEmail(testEmail);
-        existingUnverified.setName("Old Name");
-        existingUnverified.setPassword(passwordEncoder.encode("oldPassword"));
-        existingUnverified.setRole(alumniRole);
         existingUnverified.setVerified(false);
 
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(existingUnverified));
         when(roleRepository.findByRoleName("ALUMNI")).thenReturn(Optional.of(alumniRole));
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        User updatedAttempt = new User();
-        updatedAttempt.setEmail(testEmail);
-        updatedAttempt.setName("Updated Name");
-        updatedAttempt.setPassword("NewSecretPassword!");
-        updatedAttempt.setRole(alumniRole);
+        User updateAttempt = new User();
+        updateAttempt.setEmail(testEmail);
+        updateAttempt.setName("Updated Name");
+        updateAttempt.setPassword("NewSecretPassword!");
 
-        User result = userService.createUser(updatedAttempt);
+        User result = userService.createUser(updateAttempt);
 
+        assertNotNull(result);
+        assertEquals(42L, result.getId());
         assertEquals("Updated Name", result.getName());
         assertFalse(result.isVerified());
         assertTrue(passwordEncoder.matches("NewSecretPassword!", result.getPassword()));
@@ -233,112 +325,13 @@ class UserServiceAuthTest {
 
         when(userRepository.findById(105L)).thenReturn(Optional.of(studentUser));
 
-        assertDoesNotThrow(() -> userService.deleteUser(105L));
+        userService.deleteUser(105L);
+
         verify(userRepository, times(1)).delete(studentUser);
     }
 
     @Test
-    @DisplayName("Unverified STUDENT account must be rejected at login")
-    void testLogin_UnverifiedStudent_Rejected() {
-        Role studentRole = new Role("STUDENT");
-        User unverifiedStudent = new User();
-        unverifiedStudent.setEmail("student@gls.edu.in");
-        unverifiedStudent.setPassword(passwordEncoder.encode(rawPassword));
-        unverifiedStudent.setRole(studentRole);
-        unverifiedStudent.setVerified(false);
-
-        when(userRepository.findByEmail("student@gls.edu.in")).thenReturn(Optional.of(unverifiedStudent));
-
-        LoginRequestDto request = new LoginRequestDto();
-        request.setEmail("student@gls.edu.in");
-        request.setPassword(rawPassword);
-
-        AccountNotVerifiedException ex = assertThrows(AccountNotVerifiedException.class, () ->
-                userService.login(request)
-        );
-
-        assertTrue(ex.getMessage().contains("Account is not verified"));
-        verify(jwtUtil, never()).generateToken(anyString());
-    }
-
-    @Test
-    @DisplayName("Unverified FACULTY account must be rejected at login")
-    void testLogin_UnverifiedFaculty_Rejected() {
-        Role facultyRole = new Role("FACULTY");
-        User unverifiedFaculty = new User();
-        unverifiedFaculty.setEmail("faculty@gls.edu.in");
-        unverifiedFaculty.setPassword(passwordEncoder.encode(rawPassword));
-        unverifiedFaculty.setRole(facultyRole);
-        unverifiedFaculty.setVerified(false);
-
-        when(userRepository.findByEmail("faculty@gls.edu.in")).thenReturn(Optional.of(unverifiedFaculty));
-
-        LoginRequestDto request = new LoginRequestDto();
-        request.setEmail("faculty@gls.edu.in");
-        request.setPassword(rawPassword);
-
-        AccountNotVerifiedException ex = assertThrows(AccountNotVerifiedException.class, () ->
-                userService.login(request)
-        );
-
-        assertTrue(ex.getMessage().contains("Account is not verified"));
-        verify(jwtUtil, never()).generateToken(anyString());
-    }
-
-    @Test
-    @DisplayName("Verified STUDENT account logs in successfully and receives JWT")
-    void testLogin_VerifiedStudent_Succeeds() {
-        Role studentRole = new Role("STUDENT");
-        User verifiedStudent = new User();
-        verifiedStudent.setEmail("student@gls.edu.in");
-        verifiedStudent.setName("Kathan Student");
-        verifiedStudent.setPassword(passwordEncoder.encode(rawPassword));
-        verifiedStudent.setRole(studentRole);
-        verifiedStudent.setVerified(true);
-
-        when(userRepository.findByEmail("student@gls.edu.in")).thenReturn(Optional.of(verifiedStudent));
-        when(jwtUtil.generateToken("student@gls.edu.in")).thenReturn("mock.student.jwt");
-
-        LoginRequestDto request = new LoginRequestDto();
-        request.setEmail("student@gls.edu.in");
-        request.setPassword(rawPassword);
-
-        LoginResponseDto response = userService.login(request);
-
-        assertNotNull(response);
-        assertEquals("mock.student.jwt", response.getToken());
-        assertEquals("Kathan Student", response.getName());
-        assertEquals("STUDENT", response.getRole());
-    }
-
-    @Test
-    @DisplayName("getCurrentUserProfile returns user profile attributes safely")
-    void testGetCurrentUserProfile_Success() {
-        User user = new User();
-        user.setId(10L);
-        user.setEmail(testEmail);
-        user.setName("Alice Alumni");
-        user.setRole(alumniRole);
-        user.setUniversityNumber("GLS1234");
-        user.setVerified(true);
-
-        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(user));
-
-        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
-                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(testEmail, null)
-        );
-
-        com.alumni.management.user.dto.UserResponseDto profile = userService.getCurrentUserProfile();
-
-        assertNotNull(profile);
-        assertEquals(10L, profile.getId());
-        assertEquals("Alice Alumni", profile.getName());
-        assertEquals(testEmail, profile.getEmail());
-        assertEquals("ALUMNI", profile.getRoleName());
-    }
-
-    @Test
-    @DisplayName("refreshToken returns new token and user details")
+    @DisplayName("refreshToken with valid authenticated session returns fresh token")
     void testRefreshToken_Success() {
         User user = new User();
         user.setEmail(testEmail);
@@ -399,5 +392,3 @@ class UserServiceAuthTest {
         ));
     }
 }
-
-

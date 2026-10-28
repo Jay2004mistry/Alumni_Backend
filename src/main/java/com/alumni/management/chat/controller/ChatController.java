@@ -1,7 +1,7 @@
 package com.alumni.management.chat.controller;
 
 import java.security.Principal;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -148,7 +148,7 @@ public class ChatController {
 
 		Map<String, Object> presence = new HashMap<>();
 		boolean isOnline = PresenceEventListener.isUserOnline(target);
-		LocalDateTime lastSeen = PresenceEventListener.getLastSeen(target);
+		Instant lastSeen = PresenceEventListener.getLastSeen(target);
 
 		presence.put("userEmail", target);
 		presence.put("online", isOnline);

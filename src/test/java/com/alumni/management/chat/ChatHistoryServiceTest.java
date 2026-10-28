@@ -10,7 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -96,7 +96,7 @@ public class ChatHistoryServiceTest {
 
 		when(chatMessageRepository.findBySenderIgnoreCaseAndReceiverIgnoreCaseAndIsReadFalse(user2, user1))
 				.thenReturn(List.of(unreadMsg));
-		when(chatClock.now()).thenReturn(LocalDateTime.of(2026, 10, 20, 12, 0));
+		when(chatClock.nowInstant()).thenReturn(Instant.parse("2026-10-20T12:00:00Z"));
 		when(conversationRepository.findById(conversationId)).thenReturn(Optional.empty());
 
 		chatService.markMessagesAsRead(user1, user2);
@@ -161,4 +161,3 @@ public class ChatHistoryServiceTest {
 		assertEquals("recovered-msg-999", result.getId());
 	}
 }
-

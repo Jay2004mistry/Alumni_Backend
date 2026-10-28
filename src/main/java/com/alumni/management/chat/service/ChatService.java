@@ -1,6 +1,6 @@
 package com.alumni.management.chat.service;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -102,8 +102,10 @@ public class ChatService {
             }
         }
         chatMessage.setType(messageType);
-        chatMessage.setTimestamp(chatClock.now());
-        chatMessage.setUpdatedAt(chatClock.now());
+
+        Instant authoritativeNow = chatClock.nowInstant();
+        chatMessage.setTimestamp(authoritativeNow);
+        chatMessage.setUpdatedAt(authoritativeNow);
 
         // Check if receiver is online to immediately set status to DELIVERED
         boolean receiverOnline = PresenceEventListener.isUserOnline(receiver);
@@ -127,8 +129,8 @@ public class ChatService {
             }
             throw ex;
         }
-        log.info("💾 MESSAGE SAVED: id={}, sender={}, receiver={}, conversationId={}, status={}",
-                saved.getId(), saved.getSender(), saved.getReceiver(), saved.getConversationId(), saved.getStatus());
+        log.info("💾 MESSAGE SAVED: id={}, sender={}, receiver={}, conversationId={}, status={}, timestamp={}",
+                saved.getId(), saved.getSender(), saved.getReceiver(), saved.getConversationId(), saved.getStatus(), saved.getTimestamp());
 
         // Update or Create Conversation document in MongoDB
         updateConversation(conversationId, sender, receiver, saved);
@@ -156,7 +158,7 @@ public class ChatService {
                         Conversation c = new Conversation();
                         c.setId(conversationId);
                         c.setParticipants(List.of(sender, receiver));
-                        c.setCreatedAt(chatClock.now());
+                        c.setCreatedAt(chatClock.nowInstant());
                         return c;
                     });
 
@@ -164,7 +166,7 @@ public class ChatService {
             conversation.setLastMessageSender(sender);
             conversation.setLastMessageStatus(message.getStatus());
             conversation.setLastMessageAt(message.getTimestamp());
-            conversation.setUpdatedAt(chatClock.now());
+            conversation.setUpdatedAt(chatClock.nowInstant());
 
             conversation.incrementUnreadCountForUser(receiver);
 
@@ -198,11 +200,12 @@ public class ChatService {
                     .sorted(Comparator.comparing(ChatMessage::getTimestamp, Comparator.nullsFirst(Comparator.naturalOrder())))
                     .collect(Collectors.toList());
         }
+
         return messages;
     }
 
-    public void markMessagesAsRead(String myEmail, String senderEmail) {
-        String reader = myEmail != null ? myEmail.trim().toLowerCase() : "";
+    public void markMessagesAsRead(String currentReaderEmail, String senderEmail) {
+        String reader = currentReaderEmail != null ? currentReaderEmail.trim().toLowerCase() : "";
         String sender = senderEmail != null ? senderEmail.trim().toLowerCase() : "";
 
         List<ChatMessage> unread = chatMessageRepository.findBySenderIgnoreCaseAndReceiverIgnoreCaseAndIsReadFalse(sender, reader);
@@ -210,7 +213,7 @@ public class ChatService {
             for (ChatMessage msg : unread) {
                 msg.setRead(true);
                 msg.setStatus(MessageStatus.READ);
-                msg.setUpdatedAt(chatClock.now());
+                msg.setUpdatedAt(chatClock.nowInstant());
             }
             chatMessageRepository.saveAll(unread);
 
@@ -299,37 +302,35 @@ public class ChatService {
         event.setSender(sender);
         if (event.getReceiver() != null && !event.getReceiver().isEmpty()) {
             try {
-                messagingTemplate.convertAndSendToUser(
-                        event.getReceiver().trim().toLowerCase(), "/queue/typing", event);
+                messagingTemplate.convertAndSendToUser(event.getReceiver().trim().toLowerCase(), "/queue/typing", event);
             } catch (Exception e) {
+                log.error("Failed to forward typing event to {}: {}", event.getReceiver(), e.getMessage());
             }
         }
     }
 
-    public String getOrCreateConversationKey(String authenticatedUser, String partnerEmail) {
-        if (authenticatedUser == null || partnerEmail == null) {
-            throw new IllegalArgumentException("User emails must not be null");
-        }
-        String u1 = authenticatedUser.trim().toLowerCase();
-        String u2 = partnerEmail.trim().toLowerCase();
-        if (u1.isEmpty() || u2.isEmpty()) {
-            throw new IllegalArgumentException("User emails must not be empty");
-        }
-        String conversationId = Conversation.generateConversationId(u1, u2);
-        Conversation conv = conversationRepository.findById(conversationId).orElseGet(() -> {
-            Conversation newConv = new Conversation();
-            newConv.setId(conversationId);
-            newConv.setParticipants(List.of(u1, u2));
-            return newConv;
-        });
+    public String getOrCreateConversationKey(String user1, String user2) {
+        String conversationId = Conversation.generateConversationId(user1, user2);
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseGet(() -> {
+                    Conversation c = new Conversation();
+                    c.setId(conversationId);
+                    c.setParticipants(List.of(user1.toLowerCase(), user2.toLowerCase()));
+                    c.setCreatedAt(chatClock.nowInstant());
+                    c.setUpdatedAt(chatClock.nowInstant());
+                    return c;
+                });
 
         if (conv.getEncryptionKey() == null || conv.getEncryptionKey().trim().isEmpty()) {
-            byte[] randomBytes = new byte[32];
-            new java.security.SecureRandom().nextBytes(randomBytes);
-            String base64Key = java.util.Base64.getEncoder().encodeToString(randomBytes);
+            byte[] keyBytes = new byte[32];
+            new java.security.SecureRandom().nextBytes(keyBytes);
+            String base64Key = java.util.Base64.getEncoder().encodeToString(keyBytes);
             conv.setEncryptionKey(base64Key);
+            conv.setUpdatedAt(chatClock.nowInstant());
             conversationRepository.save(conv);
+            log.info("🔑 Generated and stored 256-bit AES key for conversationId={}", conversationId);
         }
+
         return conv.getEncryptionKey();
     }
 
@@ -337,30 +338,33 @@ public class ChatService {
         if (user1 == null || user2 == null) return false;
         String u1 = user1.trim().toLowerCase();
         String u2 = user2.trim().toLowerCase();
-        if (u1.isEmpty() || u2.isEmpty()) return false;
-        if (u1.equalsIgnoreCase(u2)) return true;
+        if (u1.equals(u2)) return true;
 
         String conversationId = Conversation.generateConversationId(u1, u2);
         if (conversationRepository.findById(conversationId).isPresent()) {
             return true;
         }
-        return !chatMessageRepository.findByConversationIdOrderByTimestampAsc(conversationId).isEmpty();
+
+        List<ChatMessage> msgs = chatMessageRepository.findByConversationIdOrderByTimestampAsc(conversationId);
+        if (!msgs.isEmpty()) return true;
+
+        List<ChatMessage> sent1 = chatMessageRepository.findBySenderIgnoreCaseAndReceiverIgnoreCase(u1, u2);
+        if (!sent1.isEmpty()) return true;
+
+        List<ChatMessage> sent2 = chatMessageRepository.findBySenderIgnoreCaseAndReceiverIgnoreCase(u2, u1);
+        return !sent2.isEmpty();
     }
 
-    public java.util.Set<String> getConversationPartners(String email) {
-        if (email == null || email.trim().isEmpty()) {
-            return java.util.Collections.emptySet();
-        }
-        String normalized = email.trim().toLowerCase();
-        List<Conversation> convs = conversationRepository.findByParticipantsContainingOrderByLastMessageAtDesc(normalized);
-        java.util.Set<String> partners = new java.util.HashSet<>();
-        if (convs != null) {
-            for (Conversation c : convs) {
-                if (c.getParticipants() != null) {
-                    for (String p : c.getParticipants()) {
-                        if (p != null && !p.trim().equalsIgnoreCase(normalized)) {
-                            partners.add(p.trim().toLowerCase());
-                        }
+    public Set<String> getConversationPartners(String userEmail) {
+        if (userEmail == null || userEmail.trim().isEmpty()) return Collections.emptySet();
+        String email = userEmail.trim().toLowerCase();
+        List<Conversation> convs = conversationRepository.findByParticipantsContainingOrderByLastMessageAtDesc(email);
+        Set<String> partners = new HashSet<>();
+        for (Conversation c : convs) {
+            if (c.getParticipants() != null) {
+                for (String p : c.getParticipants()) {
+                    if (p != null && !p.equalsIgnoreCase(email)) {
+                        partners.add(p.trim().toLowerCase());
                     }
                 }
             }

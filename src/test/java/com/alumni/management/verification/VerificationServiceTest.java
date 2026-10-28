@@ -71,6 +71,8 @@ class VerificationServiceTest {
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
                 .thenReturn(Optional.empty());
+        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
+                .thenReturn(Optional.empty());
 
         VerificationResponseDto response = verificationService.sendVerificationOtp(
                 testEmail,
@@ -136,6 +138,8 @@ class VerificationServiceTest {
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
                 .thenReturn(Optional.empty());
+        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
+                .thenReturn(Optional.empty());
 
         doThrow(new EmailDeliveryException("SMTP timeout"))
                 .when(emailService).sendVerificationOtpEmail(eq(testEmail), anyString(), any());
@@ -178,6 +182,43 @@ class VerificationServiceTest {
         assertNotNull(verification.getVerifiedAt());
         assertTrue(pendingUser.isVerified());
 
+        verify(verificationRepository).save(verification);
+        verify(userRepository).save(pendingUser);
+    }
+
+    @Test
+    @DisplayName("OTP created under ACCOUNT_ACTIVATION seamlessly verifies when submitted with ACCOUNT_REGISTRATION")
+    void testVerifyOtp_CrossPurposeAccountVerification_Succeeds() {
+        String plaintextOtp = "654321";
+        EmailVerification verification = new EmailVerification();
+        verification.setEmail(testEmail);
+        verification.setPurpose(VerificationPurpose.ACCOUNT_ACTIVATION);
+        verification.setOtpHash(passwordEncoder.encode(plaintextOtp));
+        verification.setAttempts(0);
+        verification.setExpiresAt(LocalDateTime.now().plusMinutes(5));
+        verification.setVerifiedAt(null);
+
+        User pendingUser = new User();
+        pendingUser.setEmail(testEmail);
+        pendingUser.setVerified(false);
+
+        // Directly querying ACCOUNT_REGISTRATION returns empty
+        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
+                .thenReturn(Optional.empty());
+        // Fallback queries ACCOUNT_ACTIVATION and finds it
+        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
+                .thenReturn(Optional.of(verification));
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(pendingUser));
+
+        VerificationResponseDto response = verificationService.verifyOtp(
+                testEmail,
+                plaintextOtp,
+                VerificationPurpose.ACCOUNT_REGISTRATION
+        );
+
+        assertTrue(response.isSuccess());
+        assertNotNull(verification.getVerifiedAt());
+        assertTrue(pendingUser.isVerified());
         verify(verificationRepository).save(verification);
         verify(userRepository).save(pendingUser);
     }
@@ -271,14 +312,13 @@ class VerificationServiceTest {
     }
 
     @Test
-    @DisplayName("Cross-purpose OTP validation is rejected")
-    void testVerifyOtp_CrossPurposeRejected() {
-        // Verification was generated for ACCOUNT_ACTIVATION, but verify is called with ACCOUNT_REGISTRATION
-        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
+    @DisplayName("Cross-purpose OTP validation between Password Reset and Registration is rejected")
+    void testVerifyOtp_PasswordResetAndRegistration_Rejected() {
+        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.PASSWORD_RESET))
                 .thenReturn(Optional.empty());
 
         assertThrows(InvalidOtpException.class, () ->
-                verificationService.verifyOtp(testEmail, "123456", VerificationPurpose.ACCOUNT_REGISTRATION)
+                verificationService.verifyOtp(testEmail, "123456", VerificationPurpose.PASSWORD_RESET)
         );
     }
 

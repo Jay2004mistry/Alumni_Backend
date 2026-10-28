@@ -13,9 +13,15 @@ public class PostDto {
 	private String userRole;
 	private String posterDepartment;
 	private String posterDesignation;
+	private String userProfilePictureUrl;
 
 	public PostDto(Long id, String content, String imageUrl, LocalDateTime createdAt, Long userId, String userName,
 			String userEmail, String userRole, String posterDepartment, String posterDesignation) {
+		this(id, content, imageUrl, createdAt, userId, userName, userEmail, userRole, posterDepartment, posterDesignation, null);
+	}
+
+	public PostDto(Long id, String content, String imageUrl, LocalDateTime createdAt, Long userId, String userName,
+			String userEmail, String userRole, String posterDepartment, String posterDesignation, String userProfilePictureUrl) {
 		super();
 		this.id = id;
 		this.content = content;
@@ -27,6 +33,7 @@ public class PostDto {
 		this.userRole = userRole;
 		this.posterDepartment = posterDepartment;
 		this.posterDesignation = posterDesignation;
+		this.userProfilePictureUrl = userProfilePictureUrl;
 	}
 
 	public PostDto() {
@@ -111,5 +118,13 @@ public class PostDto {
 
 	public void setPosterDesignation(String posterDesignation) {
 		this.posterDesignation = posterDesignation;
+	}
+
+	public String getUserProfilePictureUrl() {
+		return userProfilePictureUrl;
+	}
+
+	public void setUserProfilePictureUrl(String userProfilePictureUrl) {
+		this.userProfilePictureUrl = userProfilePictureUrl;
 	}
 }

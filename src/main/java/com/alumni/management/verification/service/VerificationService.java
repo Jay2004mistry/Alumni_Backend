@@ -46,6 +46,10 @@ public class VerificationService {
         this.passwordEncoder = passwordEncoder;
     }
 
+    private boolean isAccountVerification(VerificationPurpose purpose) {
+        return purpose == VerificationPurpose.ACCOUNT_REGISTRATION || purpose == VerificationPurpose.ACCOUNT_ACTIVATION;
+    }
+
     /**
      * Send or re-issue verification OTP.
      * Enforces normalization, cooldowns, secure generation, and hashing.
@@ -55,7 +59,7 @@ public class VerificationService {
         String email = normalizeEmail(rawEmail);
 
         // If purpose is ACCOUNT_REGISTRATION or ACCOUNT_ACTIVATION and user is already registered & verified, reject
-        if (purpose == VerificationPurpose.ACCOUNT_REGISTRATION || purpose == VerificationPurpose.ACCOUNT_ACTIVATION) {
+        if (isAccountVerification(purpose)) {
             Optional<User> existingUser = userRepository.findByEmail(email);
             if (existingUser.isPresent() && existingUser.get().isVerified()) {
                 throw new UserAlreadyExistsException("This email is already registered and verified. Please log in.");
@@ -65,6 +69,19 @@ public class VerificationService {
         EmailVerification verification = verificationRepository
                 .findByEmailAndPurposeForUpdate(email, purpose)
                 .orElse(null);
+
+        // If not found directly, check for alternate account verification purpose
+        if (verification == null && isAccountVerification(purpose)) {
+            VerificationPurpose alternate = (purpose == VerificationPurpose.ACCOUNT_ACTIVATION)
+                    ? VerificationPurpose.ACCOUNT_REGISTRATION
+                    : VerificationPurpose.ACCOUNT_ACTIVATION;
+            verification = verificationRepository
+                    .findByEmailAndPurposeForUpdate(email, alternate)
+                    .orElse(null);
+            if (verification != null) {
+                verification.setPurpose(purpose);
+            }
+        }
 
         LocalDateTime now = LocalDateTime.now();
 
@@ -132,7 +149,20 @@ public class VerificationService {
 
         EmailVerification verification = verificationRepository
                 .findByEmailAndPurposeForUpdate(email, purpose)
-                .orElseThrow(() -> new InvalidOtpException("No verification request found for this email and purpose."));
+                .orElse(null);
+
+        if (verification == null && isAccountVerification(purpose)) {
+            VerificationPurpose alternate = (purpose == VerificationPurpose.ACCOUNT_ACTIVATION)
+                    ? VerificationPurpose.ACCOUNT_REGISTRATION
+                    : VerificationPurpose.ACCOUNT_ACTIVATION;
+            verification = verificationRepository
+                    .findByEmailAndPurposeForUpdate(email, alternate)
+                    .orElse(null);
+        }
+
+        if (verification == null) {
+            throw new InvalidOtpException("No verification request found for this email and purpose.");
+        }
 
         // Already consumed
         if (verification.getVerifiedAt() != null) {
@@ -167,7 +197,7 @@ public class VerificationService {
         verificationRepository.save(verification);
 
         // Update corresponding User account if registration or activation
-        if (purpose == VerificationPurpose.ACCOUNT_REGISTRATION || purpose == VerificationPurpose.ACCOUNT_ACTIVATION) {
+        if (isAccountVerification(purpose) || isAccountVerification(verification.getPurpose())) {
             userRepository.findByEmail(email).ifPresent(user -> {
                 user.setVerified(true);
                 userRepository.save(user);

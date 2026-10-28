@@ -47,7 +47,17 @@ public class GlobalExceptionHandler {
 
 	@ExceptionHandler(AccountNotVerifiedException.class)
 	public ResponseEntity<Map<String, Object>> handleAccountNotVerified(AccountNotVerifiedException ex) {
-		return buildResponse(HttpStatus.FORBIDDEN, "Forbidden", ex.getMessage());
+		Map<String, Object> error = new HashMap<>();
+		error.put("timestamp", LocalDateTime.now());
+		error.put("status", HttpStatus.FORBIDDEN.value());
+		error.put("error", "Account Not Verified");
+		error.put("message", ex.getMessage());
+		error.put("verified", false);
+		error.put("email", ex.getEmail());
+		error.put("otpDispatched", ex.isOtpDispatched());
+		error.put("cooldownSeconds", ex.getCooldownSeconds());
+		error.put("purpose", ex.getPurpose() != null ? ex.getPurpose().name() : "ACCOUNT_ACTIVATION");
+		return new ResponseEntity<>(error, HttpStatus.FORBIDDEN);
 	}
 
 	@ExceptionHandler(UserAlreadyExistsException.class)
@@ -67,6 +77,11 @@ public class GlobalExceptionHandler {
 				.findFirst()
 				.orElse("Validation error");
 		return buildResponse(HttpStatus.BAD_REQUEST, "Validation Error", errorMessage);
+	}
+
+	@ExceptionHandler(SecurityException.class)
+	public ResponseEntity<Map<String, Object>> handleSecurityException(SecurityException ex) {
+		return buildResponse(HttpStatus.BAD_REQUEST, "Security Error", ex.getMessage());
 	}
 
 	@ExceptionHandler(IllegalArgumentException.class)

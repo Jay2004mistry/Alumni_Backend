@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -24,6 +26,13 @@ public interface EmailVerificationRepository extends JpaRepository<EmailVerifica
     Optional<EmailVerification> findByEmailAndPurposeForUpdate(
             @Param("email") String email,
             @Param("purpose") VerificationPurpose purpose
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT v FROM EmailVerification v WHERE v.email = :email AND v.purpose IN :purposes ORDER BY v.lastSentAt DESC")
+    List<EmailVerification> findByEmailAndPurposesForUpdate(
+            @Param("email") String email,
+            @Param("purposes") Collection<VerificationPurpose> purposes
     );
 
     void deleteByEmailAndPurpose(String email, VerificationPurpose purpose);

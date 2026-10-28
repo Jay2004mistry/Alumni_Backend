@@ -26,7 +26,7 @@ public class AlumniProfileService {
 //	Jwt Authentication
 	private User getCurrentUser() {
 		String email = SecurityContextHolder.getContext().getAuthentication().getName();
-		return UserRepository.findByEmail(email).orElseThrow(() -> new RuntimeException("User not found"));
+		return UserRepository.findByEmail(email).orElseThrow(() -> new ResourceNotFoundException("User not found"));
 	}
 
 //	Help to not write this everytime just call it using map(this::converToDto)
@@ -76,8 +76,13 @@ public class AlumniProfileService {
 	public AlumniProfileDto getProfileByUserId() {
 		User user = getCurrentUser();
 		AlumniProfile alumniProfile = profileRepository.findByUserId(user.getId())
-				.orElseThrow(() -> new ResourceNotFoundException("User not found"));
-		return convertToDto(alumniProfile); // This one line does everything!
+				.orElseGet(() -> {
+					AlumniProfile ap = new AlumniProfile();
+					ap.setUser(user);
+					ap.setDepartment("MCA");
+					return profileRepository.save(ap);
+				});
+		return convertToDto(alumniProfile);
 	}
 
 	public String updateProfile(AlumniProfile profile) {
@@ -145,7 +150,14 @@ public class AlumniProfileService {
 	// 2. Get profile by user ID (you already have this method but let's add it)
 	public AlumniProfileDto getAlumniProfileByUserId(Long userId) {
 		AlumniProfile profile = profileRepository.findByUserId(userId)
-				.orElseThrow(() -> new ResourceNotFoundException("Profile not found for user id: " + userId));
+				.orElseGet(() -> {
+					User user = UserRepository.findById(userId)
+							.orElseThrow(() -> new ResourceNotFoundException("Profile not found for user id: " + userId));
+					AlumniProfile ap = new AlumniProfile();
+					ap.setUser(user);
+					ap.setDepartment("MCA");
+					return profileRepository.save(ap);
+				});
 		return convertToDto(profile);
 	}
 
