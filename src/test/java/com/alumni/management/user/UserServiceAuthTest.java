@@ -391,4 +391,50 @@ class UserServiceAuthTest {
             passwordEncoder.matches("NewSecurePassword456!", savedUser.getPassword())
         ));
     }
+
+    @Test
+    @DisplayName("updateCurrentUserName successfully updates user name and persists to repository")
+    void testUpdateCurrentUserName_Success() {
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(testEmail, "pass")
+        );
+
+        User user = new User();
+        user.setId(50L);
+        user.setEmail(testEmail);
+        user.setName("Old Name");
+        user.setRole(alumniRole);
+
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        com.alumni.management.user.dto.UserResponseDto result = userService.updateCurrentUserName("Dr. Jane Doe");
+
+        assertNotNull(result);
+        assertEquals("Dr. Jane Doe", result.getName());
+        assertEquals(testEmail, result.getEmail());
+        assertEquals("Dr. Jane Doe", user.getName());
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    @DisplayName("updateCurrentUserName with empty or too short name throws IllegalArgumentException")
+    void testUpdateCurrentUserName_Validation() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () ->
+            userService.updateCurrentUserName("  ")
+        );
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () ->
+            userService.updateCurrentUserName("A")
+        );
+    }
+
+    @Test
+    @DisplayName("updateCurrentUserName when unauthenticated throws SecurityException")
+    void testUpdateCurrentUserName_Unauthenticated() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+
+        org.junit.jupiter.api.Assertions.assertThrows(SecurityException.class, () ->
+            userService.updateCurrentUserName("Valid Name")
+        );
+    }
 }

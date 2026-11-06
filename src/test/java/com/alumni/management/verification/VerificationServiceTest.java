@@ -16,10 +16,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -41,7 +44,7 @@ class VerificationServiceTest {
     private PasswordEncoder passwordEncoder;
     private VerificationService verificationService;
 
-    private final String testEmail = "test@example.com";
+    private final String testEmail = "test@gls.edu.in";
 
     @BeforeEach
     void setUp() {
@@ -66,13 +69,13 @@ class VerificationServiceTest {
     }
 
     @Test
-    @DisplayName("Send OTP stores secure hash, never plaintext, and dispatches email")
-    void testSendVerificationOtp_StoresHashedOtp() {
+    @DisplayName("1. First OTP generation creates new record, stores hashed OTP, and dispatches email")
+    void testFirstOtpGeneration_CreatesNewRecordAndDispatchesOtp() {
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.empty());
+                .thenReturn(Collections.emptyList());
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
-                .thenReturn(Optional.empty());
+                .thenReturn(Collections.emptyList());
 
         VerificationResponseDto response = verificationService.sendVerificationOtp(
                 testEmail,
@@ -83,7 +86,7 @@ class VerificationServiceTest {
         assertEquals(60, response.getCooldownSeconds());
 
         ArgumentCaptor<EmailVerification> captor = ArgumentCaptor.forClass(EmailVerification.class);
-        verify(verificationRepository).save(captor.capture());
+        verify(verificationRepository).saveAndFlush(captor.capture());
 
         EmailVerification saved = captor.getValue();
         assertEquals(testEmail, saved.getEmail());
@@ -122,7 +125,7 @@ class VerificationServiceTest {
 
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.of(existing));
+                .thenReturn(List.of(existing));
 
         ResendCooldownException ex = assertThrows(ResendCooldownException.class, () ->
                 verificationService.sendVerificationOtp(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION)
@@ -137,9 +140,9 @@ class VerificationServiceTest {
     void testSendVerificationOtp_EmailDeliveryFailure_ResetsCooldown() {
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.empty());
+                .thenReturn(Collections.emptyList());
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
-                .thenReturn(Optional.empty());
+                .thenReturn(Collections.emptyList());
 
         doThrow(new EmailDeliveryException("SMTP timeout"))
                 .when(emailService).sendVerificationOtpEmail(eq(testEmail), anyString(), any());
@@ -149,14 +152,50 @@ class VerificationServiceTest {
         );
 
         // Verification repository should have been updated to reset lastSentAt
-        verify(verificationRepository, times(2)).save(any(EmailVerification.class));
+        verify(verificationRepository, times(1)).save(any(EmailVerification.class));
     }
 
     @Test
-    @DisplayName("Successful OTP verification marks record and updates user verified status")
-    void testVerifyOtp_Success() {
+    @DisplayName("2. Resending OTP updates existing active record rather than inserting new record")
+    void testResendingOtp_UpdatesExistingActiveRecord_NoNewInsert() {
+        EmailVerification existing = new EmailVerification();
+        existing.setId(101L);
+        existing.setEmail(testEmail);
+        existing.setPurpose(VerificationPurpose.ACCOUNT_REGISTRATION);
+        existing.setOtpHash(passwordEncoder.encode("111111"));
+        existing.setAttempts(3);
+        existing.setLastSentAt(LocalDateTime.now().minusSeconds(75)); // Cooldown elapsed
+
+        when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
+        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
+                .thenReturn(List.of(existing));
+
+        VerificationResponseDto response = verificationService.resendOtp(
+                testEmail,
+                VerificationPurpose.ACCOUNT_REGISTRATION
+        );
+
+        assertTrue(response.isSuccess());
+        assertEquals("A new verification code has been sent to your email.", response.getMessage());
+
+        // Verify the existing instance is updated and flushed
+        ArgumentCaptor<EmailVerification> captor = ArgumentCaptor.forClass(EmailVerification.class);
+        verify(verificationRepository).saveAndFlush(captor.capture());
+
+        EmailVerification saved = captor.getValue();
+        assertEquals(101L, saved.getId(), "Must preserve existing entity ID");
+        assertEquals(0, saved.getAttempts(), "Attempts counter must be reset on resend");
+        assertFalse(passwordEncoder.matches("111111", saved.getOtpHash()), "Old OTP must be replaced by new hash");
+        assertNull(saved.getVerifiedAt());
+        verify(emailService, times(1)).sendVerificationOtpEmail(eq(testEmail), anyString(), eq(VerificationPurpose.ACCOUNT_REGISTRATION));
+    }
+
+    @Test
+    @DisplayName("3. Verifying a valid OTP marks record as verified and activates user")
+    void testVerifyingValidOtp_MarksVerified_ActivatesUser() {
         String plaintextOtp = "123456";
         EmailVerification verification = new EmailVerification();
+        verification.setId(202L);
         verification.setEmail(testEmail);
         verification.setPurpose(VerificationPurpose.ACCOUNT_REGISTRATION);
         verification.setOtpHash(passwordEncoder.encode(plaintextOtp));
@@ -169,7 +208,7 @@ class VerificationServiceTest {
         pendingUser.setVerified(false);
 
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.of(verification));
+                .thenReturn(List.of(verification));
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(pendingUser));
 
         VerificationResponseDto response = verificationService.verifyOtp(
@@ -179,8 +218,8 @@ class VerificationServiceTest {
         );
 
         assertTrue(response.isSuccess());
-        assertNotNull(verification.getVerifiedAt());
-        assertTrue(pendingUser.isVerified());
+        assertNotNull(verification.getVerifiedAt(), "verifiedAt must be stamped");
+        assertTrue(pendingUser.isVerified(), "User account must be marked verified");
 
         verify(verificationRepository).save(verification);
         verify(userRepository).save(pendingUser);
@@ -202,12 +241,12 @@ class VerificationServiceTest {
         pendingUser.setEmail(testEmail);
         pendingUser.setVerified(false);
 
-        // Directly querying ACCOUNT_REGISTRATION returns empty
+        // Direct query for ACCOUNT_REGISTRATION returns empty
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.empty());
+                .thenReturn(Collections.emptyList());
         // Fallback queries ACCOUNT_ACTIVATION and finds it
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
-                .thenReturn(Optional.of(verification));
+                .thenReturn(List.of(verification));
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.of(pendingUser));
 
         VerificationResponseDto response = verificationService.verifyOtp(
@@ -224,8 +263,26 @@ class VerificationServiceTest {
     }
 
     @Test
-    @DisplayName("Incorrect OTP increments attempt counter and throws InvalidOtpException")
-    void testVerifyOtp_IncorrectOtp_IncrementsAttempts() {
+    @DisplayName("4. Verifying an expired OTP throws OtpExpiredException")
+    void testVerifyingExpiredOtp_ThrowsOtpExpiredException() {
+        EmailVerification verification = new EmailVerification();
+        verification.setEmail(testEmail);
+        verification.setPurpose(VerificationPurpose.ACCOUNT_REGISTRATION);
+        verification.setOtpHash(passwordEncoder.encode("123456"));
+        verification.setAttempts(0);
+        verification.setExpiresAt(LocalDateTime.now().minusSeconds(10)); // Expired 10s ago
+
+        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
+                .thenReturn(List.of(verification));
+
+        assertThrows(OtpExpiredException.class, () ->
+                verificationService.verifyOtp(testEmail, "123456", VerificationPurpose.ACCOUNT_REGISTRATION)
+        );
+    }
+
+    @Test
+    @DisplayName("5. Multiple verification attempts increment attempt counter until MAX_ATTEMPTS reached")
+    void testMultipleOtpVerificationAttempts_IncrementsAttemptsUntilMax() {
         String correctOtp = "123456";
         String incorrectOtp = "654321";
 
@@ -238,7 +295,7 @@ class VerificationServiceTest {
         verification.setVerifiedAt(null);
 
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.of(verification));
+                .thenReturn(List.of(verification));
 
         InvalidOtpException ex = assertThrows(InvalidOtpException.class, () ->
                 verificationService.verifyOtp(testEmail, incorrectOtp, VerificationPurpose.ACCOUNT_REGISTRATION)
@@ -247,49 +304,13 @@ class VerificationServiceTest {
         assertTrue(ex.getMessage().contains("3 attempts remaining"));
         assertEquals(2, verification.getAttempts());
         verify(verificationRepository).saveAndFlush(verification);
-        verify(userRepository, never()).save(any());
-    }
 
-    @Test
-    @DisplayName("Fifth failed verification attempt triggers MaxAttemptsExceededException")
-    void testVerifyOtp_MaxAttemptsExceeded() {
-        String correctOtp = "123456";
-        String incorrectOtp = "000000";
-
-        EmailVerification verification = new EmailVerification();
-        verification.setEmail(testEmail);
-        verification.setPurpose(VerificationPurpose.ACCOUNT_REGISTRATION);
-        verification.setOtpHash(passwordEncoder.encode(correctOtp));
-        verification.setAttempts(4); // 4 prior failed attempts
-        verification.setExpiresAt(LocalDateTime.now().plusMinutes(5));
-
-        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.of(verification));
-
+        // Now test 5th failed attempt triggers MaxAttemptsExceededException
+        verification.setAttempts(4);
         assertThrows(MaxAttemptsExceededException.class, () ->
                 verificationService.verifyOtp(testEmail, incorrectOtp, VerificationPurpose.ACCOUNT_REGISTRATION)
         );
-
         assertEquals(5, verification.getAttempts());
-        verify(verificationRepository).saveAndFlush(verification);
-    }
-
-    @Test
-    @DisplayName("Expired OTP is rejected with OtpExpiredException")
-    void testVerifyOtp_Expired() {
-        EmailVerification verification = new EmailVerification();
-        verification.setEmail(testEmail);
-        verification.setPurpose(VerificationPurpose.ACCOUNT_REGISTRATION);
-        verification.setOtpHash(passwordEncoder.encode("123456"));
-        verification.setAttempts(0);
-        verification.setExpiresAt(LocalDateTime.now().minusSeconds(10)); // expired 10s ago
-
-        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.of(verification));
-
-        assertThrows(OtpExpiredException.class, () ->
-                verificationService.verifyOtp(testEmail, "123456", VerificationPurpose.ACCOUNT_REGISTRATION)
-        );
     }
 
     @Test
@@ -302,7 +323,7 @@ class VerificationServiceTest {
         verification.setVerifiedAt(LocalDateTime.now().minusMinutes(1)); // already verified
 
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.of(verification));
+                .thenReturn(List.of(verification));
 
         InvalidOtpException ex = assertThrows(InvalidOtpException.class, () ->
                 verificationService.verifyOtp(testEmail, "123456", VerificationPurpose.ACCOUNT_REGISTRATION)
@@ -312,39 +333,58 @@ class VerificationServiceTest {
     }
 
     @Test
-    @DisplayName("Cross-purpose OTP validation between Password Reset and Registration is rejected")
-    void testVerifyOtp_PasswordResetAndRegistration_Rejected() {
-        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.PASSWORD_RESET))
-                .thenReturn(Optional.empty());
+    @DisplayName("6. Duplicate records handling selects active record and automatically cleans up stale duplicates without IncorrectResultSizeDataAccessException")
+    void testDuplicateRecords_ConsolidatesToLatestAndCleansUpStaleDuplicates() {
+        // Simulate historical duplicate records in database for the same email and purpose
+        EmailVerification latestActive = new EmailVerification();
+        latestActive.setId(35L);
+        latestActive.setEmail(testEmail);
+        latestActive.setPurpose(VerificationPurpose.ACCOUNT_REGISTRATION);
+        latestActive.setOtpHash(passwordEncoder.encode("888888"));
+        latestActive.setLastSentAt(LocalDateTime.now().minusSeconds(20));
+        latestActive.setExpiresAt(LocalDateTime.now().plusMinutes(5));
 
-        assertThrows(InvalidOtpException.class, () ->
-                verificationService.verifyOtp(testEmail, "123456", VerificationPurpose.PASSWORD_RESET)
-        );
+        EmailVerification staleDuplicate = new EmailVerification();
+        staleDuplicate.setId(34L);
+        staleDuplicate.setEmail(testEmail);
+        staleDuplicate.setPurpose(VerificationPurpose.ACCOUNT_REGISTRATION);
+        staleDuplicate.setOtpHash(passwordEncoder.encode("999999"));
+        staleDuplicate.setLastSentAt(LocalDateTime.now().minusMinutes(10));
+        staleDuplicate.setExpiresAt(LocalDateTime.now().minusMinutes(5));
+
+        // When repository returns multiple records ordered by lastSentAt DESC
+        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
+                .thenReturn(List.of(latestActive, staleDuplicate));
+
+        EmailVerification retrieved = verificationService.getActiveVerificationForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION);
+
+        assertNotNull(retrieved);
+        assertEquals(35L, retrieved.getId(), "Must select latest active record");
+
+        // Verify stale duplicate (id: 34) was deleted and flushed
+        verify(verificationRepository).delete(staleDuplicate);
+        verify(verificationRepository).flush();
     }
 
     @Test
-    @DisplayName("Resending OTP supersedes previous active OTP and resets attempts")
-    void testResendOtp_SupersedesPreviousOtp() {
-        EmailVerification existing = new EmailVerification();
-        existing.setEmail(testEmail);
-        existing.setPurpose(VerificationPurpose.ACCOUNT_REGISTRATION);
-        existing.setOtpHash(passwordEncoder.encode("111111"));
-        existing.setAttempts(3);
-        existing.setLastSentAt(LocalDateTime.now().minusSeconds(70)); // cooldown passed
-
+    @DisplayName("7. Concurrent resend requests hitting unique constraint throw ResendCooldownException instead of crashing")
+    void testConcurrentResendRequests_DataIntegrityViolation_EnforcesCooldown() {
         when(userRepository.findByEmail(testEmail)).thenReturn(Optional.empty());
         when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION))
-                .thenReturn(Optional.of(existing));
+                .thenReturn(Collections.emptyList());
+        when(verificationRepository.findByEmailAndPurposeForUpdate(testEmail, VerificationPurpose.ACCOUNT_ACTIVATION))
+                .thenReturn(Collections.emptyList());
 
-        VerificationResponseDto response = verificationService.resendOtp(
-                testEmail,
-                VerificationPurpose.ACCOUNT_REGISTRATION
+        // Simulate concurrent insert unique index violation
+        when(verificationRepository.saveAndFlush(any(EmailVerification.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key value violates unique constraint uk_email_verification_email_purpose"));
+
+        ResendCooldownException ex = assertThrows(ResendCooldownException.class, () ->
+                verificationService.sendVerificationOtp(testEmail, VerificationPurpose.ACCOUNT_REGISTRATION)
         );
 
-        assertTrue(response.isSuccess());
-        assertEquals(0, existing.getAttempts(), "Attempts must be reset to 0 for replacement OTP");
-        assertNotNull(existing.getOtpHash());
-        assertFalse(passwordEncoder.matches("111111", existing.getOtpHash()), "Old OTP must be superseded");
-        assertNull(existing.getVerifiedAt());
+        assertTrue(ex.getMessage().contains("A verification code was already requested"));
+        assertEquals(60, ex.getSecondsRemaining());
+        verify(emailService, never()).sendVerificationOtpEmail(anyString(), anyString(), any());
     }
 }

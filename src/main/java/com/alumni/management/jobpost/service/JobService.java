@@ -140,24 +140,56 @@ public class JobService {
 		Job existingJob = jobRepository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Job not found with id: " + id));
 
-		// Check if current user is the owner of the job
-		if (existingJob.getUser() == null || !existingJob.getUser().getId().equals(currentUser.getId())) {
-			throw new RuntimeException("You are not authorized to update this job post");
+		// Check if current user is the owner of the job or an admin
+		String userRole = (currentUser.getRole() != null && currentUser.getRole().getRoleName() != null)
+				? currentUser.getRole().getRoleName().toUpperCase()
+				: "";
+		boolean isOwner = existingJob.getUser() != null && existingJob.getUser().getId().equals(currentUser.getId());
+		boolean isAdmin = "ADMIN".equals(userRole);
+
+		if (!isOwner && !isAdmin) {
+			throw new SecurityException("You are not authorized to update this job post");
 		}
 
-		// Update job details
-		existingJob.setCompanyName(jobDto.getCompanyName());
-		existingJob.setJobTitle(jobDto.getJobTitle());
-		existingJob.setLocation(jobDto.getLocation());
-		existingJob.setSalary(jobDto.getSalary());
-		existingJob.setJobDescription(jobDto.getJobDescription());
-		existingJob.setSkillsRequired(jobDto.getSkillsRequired());
-		existingJob.setExperienceRequired(jobDto.getExperienceRequired());
-		existingJob.setJoiningType(jobDto.getJoiningType());
-		existingJob.setJobType(jobDto.getJobType());
+		// Validation of required fields
+		if (jobDto.getCompanyName() == null || jobDto.getCompanyName().trim().isEmpty()) {
+			throw new IllegalArgumentException("Company name is required");
+		}
+		if (jobDto.getJobTitle() == null || jobDto.getJobTitle().trim().length() < 2) {
+			throw new IllegalArgumentException("Job title must be at least 2 characters");
+		}
+		if (jobDto.getLocation() == null || jobDto.getLocation().trim().isEmpty()) {
+			throw new IllegalArgumentException("Location is required");
+		}
+		if (jobDto.getSalary() == null || jobDto.getSalary().trim().isEmpty()) {
+			throw new IllegalArgumentException("Salary is required");
+		}
+		if (jobDto.getJobDescription() == null || jobDto.getJobDescription().trim().length() < 10) {
+			throw new IllegalArgumentException("Job description must be at least 10 characters");
+		}
+		if (jobDto.getSkillsRequired() == null || jobDto.getSkillsRequired().trim().isEmpty()) {
+			throw new IllegalArgumentException("Skills required cannot be empty");
+		}
+		if (jobDto.getExperienceRequired() == null || jobDto.getExperienceRequired().trim().isEmpty()) {
+			throw new IllegalArgumentException("Experience required cannot be empty");
+		}
+		if (jobDto.getLastDateToApply() == null) {
+			throw new IllegalArgumentException("Last date to apply is required");
+		}
+
+		// Update job details (preserve the original owner user)
+		existingJob.setCompanyName(jobDto.getCompanyName().trim());
+		existingJob.setJobTitle(jobDto.getJobTitle().trim());
+		existingJob.setLocation(jobDto.getLocation().trim());
+		existingJob.setSalary(jobDto.getSalary().trim());
+		existingJob.setJobDescription(jobDto.getJobDescription().trim());
+		existingJob.setSkillsRequired(jobDto.getSkillsRequired().trim());
+		existingJob.setExperienceRequired(jobDto.getExperienceRequired().trim());
+		existingJob.setJoiningType(jobDto.getJoiningType() != null && !jobDto.getJoiningType().trim().isEmpty() ? jobDto.getJoiningType().trim() : "Immediate");
+		existingJob.setJobType(jobDto.getJobType() != null && !jobDto.getJobType().trim().isEmpty() ? jobDto.getJobType().trim() : "Full Time");
 		existingJob.setLastDateToApply(jobDto.getLastDateToApply());
-		existingJob.setCompanyLink(jobDto.getCompanyLink());
-		existingJob.setCompanyEmail(jobDto.getCompanyEmail());
+		existingJob.setCompanyLink(jobDto.getCompanyLink() != null ? jobDto.getCompanyLink().trim() : null);
+		existingJob.setCompanyEmail(jobDto.getCompanyEmail() != null ? jobDto.getCompanyEmail().trim() : null);
 
 		jobRepository.save(existingJob);
 		return "Job post updated successfully with ID: " + id;

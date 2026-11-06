@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.alumni.management.exception.ResourceNotFoundException;
@@ -204,7 +205,11 @@ public class UserService {
 				.orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
 		if (user.getName() != null && !user.getName().trim().isEmpty()) {
-			existingUser.setName(user.getName().trim());
+			String clean = user.getName().trim();
+			if (clean.length() < 2 || clean.length() > 100) {
+				throw new IllegalArgumentException("User name must be between 2 and 100 characters");
+			}
+			existingUser.setName(clean);
 		}
 		if (user.getEmail() != null && !user.getEmail().trim().isEmpty()) {
 			existingUser.setEmail(user.getEmail().trim().toLowerCase(java.util.Locale.ROOT));
@@ -292,6 +297,36 @@ public class UserService {
 				user.getRole() != null ? user.getRole().getRoleName() : "USER",
 				getUserDepartment(user),
 				getUserProfilePicture(user));
+	}
+
+	@Transactional
+	public UserResponseDto updateCurrentUserName(String newName) {
+		if (newName == null || newName.trim().isEmpty()) {
+			throw new IllegalArgumentException("User name is required");
+		}
+		String cleanName = newName.trim();
+		if (cleanName.length() < 2 || cleanName.length() > 100) {
+			throw new IllegalArgumentException("User name must be between 2 and 100 characters");
+		}
+		String currentEmail = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication() != null
+				? org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName()
+				: null;
+		if (currentEmail == null || "anonymousUser".equalsIgnoreCase(currentEmail)) {
+			throw new SecurityException("Authentication required to update user name");
+		}
+		User currentUser = userRepository.findByEmail(currentEmail.trim().toLowerCase(java.util.Locale.ROOT))
+				.orElseThrow(() -> new ResourceNotFoundException("Authenticated user not found"));
+
+		currentUser.setName(cleanName);
+		User saved = userRepository.save(currentUser);
+
+		return new UserResponseDto(
+				saved.getId(),
+				saved.getName(),
+				saved.getEmail(),
+				saved.getRole() != null ? saved.getRole().getRoleName() : "USER",
+				getUserDepartment(saved),
+				getUserProfilePicture(saved));
 	}
 
 	public String uploadProfileImage(MultipartFile image) throws IOException {

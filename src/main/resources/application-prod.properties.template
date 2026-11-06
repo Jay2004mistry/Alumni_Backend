@@ -55,3 +55,9 @@ app.upload.dir=${APP_UPLOAD_DIR:/var/gls-connect/uploads}
 # Specify comma-separated approved remote client origins (e.g. https://glsconnect.edu,https://alumni.glsconnect.edu)
 cors.allowed.origins=${CORS_ALLOWED_ORIGINS:https://glsconnect.edu,https://alumni.glsconnect.edu}
 
+
+# Firebase Cloud Messaging Configuration
+firebase.enabled=true
+# Set either path to service-account file or raw JSON in environment
+firebase.credentials.path=${FIREBASE_CREDENTIALS_PATH:}
+firebase.credentials.json=${FIREBASE_CREDENTIALS_JSON:}

@@ -16,20 +16,26 @@ import java.util.Optional;
 @Repository
 public interface EmailVerificationRepository extends JpaRepository<EmailVerification, Long> {
 
-    Optional<EmailVerification> findByEmailAndPurpose(
+    Optional<EmailVerification> findFirstByEmailAndPurposeOrderByLastSentAtDesc(
             String email,
             VerificationPurpose purpose
     );
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT v FROM EmailVerification v WHERE v.email = :email AND v.purpose = :purpose")
-    Optional<EmailVerification> findByEmailAndPurposeForUpdate(
+    @Query("SELECT v FROM EmailVerification v WHERE v.email = :email AND v.purpose = :purpose ORDER BY v.lastSentAt DESC, v.id DESC")
+    List<EmailVerification> findAllByEmailAndPurpose(
             @Param("email") String email,
             @Param("purpose") VerificationPurpose purpose
     );
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT v FROM EmailVerification v WHERE v.email = :email AND v.purpose IN :purposes ORDER BY v.lastSentAt DESC")
+    @Query("SELECT v FROM EmailVerification v WHERE v.email = :email AND v.purpose = :purpose ORDER BY v.lastSentAt DESC, v.id DESC")
+    List<EmailVerification> findByEmailAndPurposeForUpdate(
+            @Param("email") String email,
+            @Param("purpose") VerificationPurpose purpose
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT v FROM EmailVerification v WHERE v.email = :email AND v.purpose IN :purposes ORDER BY v.lastSentAt DESC, v.id DESC")
     List<EmailVerification> findByEmailAndPurposesForUpdate(
             @Param("email") String email,
             @Param("purposes") Collection<VerificationPurpose> purposes

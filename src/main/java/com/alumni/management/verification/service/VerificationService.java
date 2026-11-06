@@ -10,6 +10,7 @@ import com.alumni.management.verification.exception.*;
 import com.alumni.management.verification.repository.EmailVerificationRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -51,6 +53,43 @@ public class VerificationService {
     }
 
     /**
+     * Safely retrieves the active verification record for the specified email and purpose using pessimistic locking.
+     * Consolidates duplicate records if found, preserving the latest active OTP and removing obsolete duplicates.
+     */
+    public EmailVerification getActiveVerificationForUpdate(String email, VerificationPurpose purpose) {
+        List<EmailVerification> records = verificationRepository.findByEmailAndPurposeForUpdate(email, purpose);
+
+        // If not found and purpose is account verification, check alternate account purpose
+        if (records.isEmpty() && isAccountVerification(purpose)) {
+            VerificationPurpose alternate = (purpose == VerificationPurpose.ACCOUNT_ACTIVATION)
+                    ? VerificationPurpose.ACCOUNT_REGISTRATION
+                    : VerificationPurpose.ACCOUNT_ACTIVATION;
+            records = verificationRepository.findByEmailAndPurposeForUpdate(email, alternate);
+            if (!records.isEmpty()) {
+                records.get(0).setPurpose(purpose);
+            }
+        }
+
+        if (records.isEmpty()) {
+            return null;
+        }
+
+        EmailVerification active = records.get(0);
+
+        // If duplicate records exist in database, consolidate by purging stale duplicates
+        if (records.size() > 1) {
+            logger.warn("Found {} duplicate EmailVerification records for email: {} and purpose: {}. Consolidating to record id: {}",
+                    records.size(), email, purpose, active.getId());
+            for (int i = 1; i < records.size(); i++) {
+                verificationRepository.delete(records.get(i));
+            }
+            verificationRepository.flush();
+        }
+
+        return active;
+    }
+
+    /**
      * Send or re-issue verification OTP.
      * Enforces normalization, cooldowns, secure generation, and hashing.
      */
@@ -66,22 +105,7 @@ public class VerificationService {
             }
         }
 
-        EmailVerification verification = verificationRepository
-                .findByEmailAndPurposeForUpdate(email, purpose)
-                .orElse(null);
-
-        // If not found directly, check for alternate account verification purpose
-        if (verification == null && isAccountVerification(purpose)) {
-            VerificationPurpose alternate = (purpose == VerificationPurpose.ACCOUNT_ACTIVATION)
-                    ? VerificationPurpose.ACCOUNT_REGISTRATION
-                    : VerificationPurpose.ACCOUNT_ACTIVATION;
-            verification = verificationRepository
-                    .findByEmailAndPurposeForUpdate(email, alternate)
-                    .orElse(null);
-            if (verification != null) {
-                verification.setPurpose(purpose);
-            }
-        }
+        EmailVerification verification = getActiveVerificationForUpdate(email, purpose);
 
         LocalDateTime now = LocalDateTime.now();
 
@@ -114,7 +138,15 @@ public class VerificationService {
         verification.setExpiresAt(now.plusMinutes(OTP_EXPIRY_MINUTES));
         verification.setVerifiedAt(null);
 
-        verificationRepository.save(verification);
+        try {
+            verification = verificationRepository.saveAndFlush(verification);
+        } catch (DataIntegrityViolationException dive) {
+            logger.warn("Concurrent OTP insertion detected for email: {} and purpose: {}. Enforcing cooldown.", email, purpose);
+            throw new ResendCooldownException(
+                    "A verification code was already requested. Please wait 60 seconds before requesting a new code.",
+                    RESEND_COOLDOWN_SECONDS
+            );
+        }
 
         // Deliver email via EmailService
         try {
@@ -147,18 +179,7 @@ public class VerificationService {
             throw new InvalidOtpException("Verification code must be exactly 6 digits.");
         }
 
-        EmailVerification verification = verificationRepository
-                .findByEmailAndPurposeForUpdate(email, purpose)
-                .orElse(null);
-
-        if (verification == null && isAccountVerification(purpose)) {
-            VerificationPurpose alternate = (purpose == VerificationPurpose.ACCOUNT_ACTIVATION)
-                    ? VerificationPurpose.ACCOUNT_REGISTRATION
-                    : VerificationPurpose.ACCOUNT_ACTIVATION;
-            verification = verificationRepository
-                    .findByEmailAndPurposeForUpdate(email, alternate)
-                    .orElse(null);
-        }
+        EmailVerification verification = getActiveVerificationForUpdate(email, purpose);
 
         if (verification == null) {
             throw new InvalidOtpException("No verification request found for this email and purpose.");

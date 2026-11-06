@@ -94,6 +94,18 @@ public class GlobalExceptionHandler {
 		return buildResponse(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage());
 	}
 
+	@ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+	public ResponseEntity<Map<String, Object>> handleDataIntegrityViolation(org.springframework.dao.DataIntegrityViolationException ex) {
+		String msg = ex.getMessage() != null ? ex.getMessage() : "";
+		if (msg.contains("email_verification") || msg.contains("uk_email_verification")) {
+			return handleResendCooldown(new ResendCooldownException(
+					"A verification code was already requested. Please wait 60 seconds before requesting a new code.",
+					60
+			));
+		}
+		return buildResponse(HttpStatus.CONFLICT, "Conflict", "Database constraint violation");
+	}
+
 	private ResponseEntity<Map<String, Object>> buildResponse(HttpStatus status, String errorTitle, String message) {
 		Map<String, Object> error = new HashMap<>();
 		error.put("timestamp", LocalDateTime.now());

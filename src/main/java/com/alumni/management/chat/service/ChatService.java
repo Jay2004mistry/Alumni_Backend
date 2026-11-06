@@ -46,6 +46,9 @@ public class ChatService {
     @Autowired
     private ChatClock chatClock;
 
+    @Autowired(required = false)
+    private com.alumni.management.notification.service.PushNotificationService pushNotificationService;
+
     public ChatMessage processAndSendMessage(String authenticatedSender, ChatSendRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("Chat request payload must not be null.");
@@ -146,6 +149,15 @@ public class ChatService {
             messagingTemplate.convertAndSendToUser(sender, "/queue/messages", saved);
         } catch (Exception e) {
             log.error("❌ BROADCAST FAILED for messageId={}: {}", saved.getId(), e.getMessage(), e);
+        }
+
+        // Deliver push notification via Firebase Cloud Messaging
+        if (pushNotificationService != null) {
+            try {
+                pushNotificationService.sendChatMessageNotification(saved);
+            } catch (Exception e) {
+                log.error("⚠️ Push notification dispatch failed for messageId={}: {}", saved.getId(), e.getMessage());
+            }
         }
 
         return saved;

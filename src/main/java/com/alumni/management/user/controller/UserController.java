@@ -64,6 +64,12 @@ public class UserController {
 		return userService.getCurrentUserProfile();
 	}
 
+	@PutMapping("/profile/name")
+	public UserResponseDto updateCurrentUserName(@RequestBody java.util.Map<String, String> request) {
+		String name = request.get("name");
+		return userService.updateCurrentUserName(name);
+	}
+
 	@PostMapping("/refresh-token")
 	public java.util.Map<String, String> refreshToken() {
 		return userService.refreshToken();

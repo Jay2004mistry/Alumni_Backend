@@ -37,3 +37,8 @@ build/
 application-local.properties
 .env
 .env.*
+
+### Firebase Credentials ###
+*firebase*.json
+*service-account*.json
+firebase-adminsdk*.json
