@@ -182,8 +182,8 @@ public class ChatService {
 
             conversation.incrementUnreadCountForUser(receiver);
 
-            conversation.clearHiddenAtForUser(sender);
-            conversation.clearHiddenAtForUser(receiver);
+            // conversation.clearHiddenAtForUser(sender);
+            // conversation.clearHiddenAtForUser(receiver);
 
             conversationRepository.save(conversation);
             log.info("💾 CONVERSATION UPDATED: conversationId={}, lastSender={}, unreadForReceiver={}",
@@ -243,6 +243,18 @@ public class ChatService {
                     .collect(Collectors.toList());
         }
 
+        Instant hiddenAt = conversationRepository.findById(conversationId)
+            .map(conversation -> conversation.getHiddenAtForUser(user1))
+            .orElse(null);
+
+        if (hiddenAt != null) {
+
+            messages = messages.stream()
+                .filter(message -> message.getTimestamp() != null && message.getTimestamp().isAfter(hiddenAt))  
+                .collect(Collectors.toList());
+
+        }
+
         return messages;
     }
 
@@ -289,10 +301,14 @@ public class ChatService {
 
     if (!convs.isEmpty()) {
         List<ChatMessage> list = new ArrayList<>();
+        
 
         for (Conversation c : convs) {
+            Instant hiddenAt = c.getHiddenAtForUser(user);
             // Skip chats hidden by this user.
-            if (c.getHiddenAtForUser(user) != null) {
+            if (hiddenAt != null 
+                && (c.getLastMessageAt() == null 
+                    || !c.getLastMessageAt().isAfter(hiddenAt))) {
                 continue;
             }
 
