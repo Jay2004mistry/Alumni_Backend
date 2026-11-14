@@ -159,7 +159,7 @@ public class PushNotificationService {
 
     public String getSenderDisplayName(String senderEmail) {
         if (senderEmail == null || senderEmail.trim().isEmpty()) {
-            return "GLS Connect";
+            return "Alumni Connect";
         }
         try {
             Optional<User> userOpt = userRepository.findByEmailIgnoreCase(senderEmail.trim());

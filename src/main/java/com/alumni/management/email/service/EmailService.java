@@ -43,22 +43,22 @@ public class EmailService {
 
             String subject;
             if (purpose == VerificationPurpose.ACCOUNT_REGISTRATION) {
-                subject = "GLS Connect - Account Registration Verification";
+                subject = "Alumni Connect - Account Registration Verification";
             } else if (purpose == VerificationPurpose.ACCOUNT_ACTIVATION) {
-                subject = "GLS Connect - Account Activation Verification";
+                subject = "Alumni Connect - Account Activation Verification";
             } else {
-                subject = "GLS Connect - Verification Code";
+                subject = "Alumni Connect - Verification Code";
             }
             message.setSubject(subject);
 
             String text = "Dear User,\n\n"
-                    + "Thank you for using GLS Connect.\n\n"
+                    + "Thank you for using Alumni Connect.\n\n"
                     + "Your One-Time Password (OTP) for verification is:\n\n"
                     + "  " + otp + "\n\n"
                     + "This code is valid for 5 minutes. Please do not share this code with anyone.\n\n"
                     + "If you did not request this verification, please ignore this email.\n\n"
                     + "Best regards,\n"
-                    + "GLS Connect Team";
+                    + "Alumni Connect Team";
             message.setText(text);
 
             mailSender.send(message);
@@ -87,13 +87,13 @@ public class EmailService {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);
             message.setTo(toEmail);
-            message.setSubject("GLS Connect - Password Reset OTP");
+            message.setSubject("Alumni Connect - Password Reset OTP");
             message.setText("Dear User,\n\n"
-                    + "Your One-Time Password (OTP) for resetting your password on GLS Connect is:\n\n"
+                    + "Your One-Time Password (OTP) for resetting your password on Alumni Connect is:\n\n"
                     + "  " + otp + "\n\n"
                     + "This OTP is valid for 15 minutes. Please do not share this OTP with anyone.\n\n"
                     + "Best regards,\n"
-                    + "GLS Connect Team");
+                    + "Alumni Connect Team");
 
             mailSender.send(message);
             logger.info("Password reset OTP email sent successfully.");
