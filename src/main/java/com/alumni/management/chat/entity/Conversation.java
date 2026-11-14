@@ -15,6 +15,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+
+
 @Document(collection = "conversations")
 @Getter
 @Setter
@@ -36,6 +38,8 @@ public class Conversation {
     private Instant lastMessageAt;
 
     private List<ParticipantUnread> unreadCounts = new ArrayList<>();
+
+    private List<ParticipantHidden> hiddenAtByUser = new ArrayList<>();
 
     private String encryptionKey;
 
@@ -96,5 +100,63 @@ public class Conversation {
     public static class ParticipantUnread {
         private String userEmail;
         private int unreadCount;
+    }
+
+    public Instant getHiddenAtForUser(String userEmail) {
+    if (userEmail == null || hiddenAtByUser == null) {
+        return null;
+    }
+
+    for (ParticipantHidden hidden : hiddenAtByUser) {
+        if (hidden != null
+                && hidden.getUserEmail() != null
+                && hidden.getUserEmail().equalsIgnoreCase(userEmail.trim())) {
+            return hidden.getHiddenAt();
+        }
+    }
+    return null;
+    }
+
+    public void setHiddenAtForUser(String userEmail, Instant hiddenAt) {
+        if (userEmail == null || userEmail.trim().isEmpty()) {
+            return;
+        }
+
+        if (hiddenAtByUser == null) {
+            hiddenAtByUser = new ArrayList<>();
+        }
+
+        String email = userEmail.trim().toLowerCase();
+
+        for (ParticipantHidden hidden : hiddenAtByUser) {
+            if (hidden != null
+                    && hidden.getUserEmail() != null
+                    && hidden.getUserEmail().equalsIgnoreCase(email)) {
+                hidden.setHiddenAt(hiddenAt);
+                return;
+            }
+        }
+
+        hiddenAtByUser.add(new ParticipantHidden(email, hiddenAt));
+    }
+
+    public void clearHiddenAtForUser(String userEmail) {
+        if (userEmail == null || hiddenAtByUser == null) {
+            return;
+        }
+
+        String email = userEmail.trim().toLowerCase();
+        hiddenAtByUser.removeIf(hidden ->
+                hidden != null
+                        && hidden.getUserEmail() != null
+                        && hidden.getUserEmail().equalsIgnoreCase(email));
+    }
+    @Getter
+    @Setter 
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ParticipantHidden {
+        private String userEmail;
+        private Instant hiddenAt;
     }
 }

@@ -182,12 +182,42 @@ public class ChatService {
 
             conversation.incrementUnreadCountForUser(receiver);
 
+            conversation.clearHiddenAtForUser(sender);
+            conversation.clearHiddenAtForUser(receiver);
+
             conversationRepository.save(conversation);
             log.info("💾 CONVERSATION UPDATED: conversationId={}, lastSender={}, unreadForReceiver={}",
                     conversationId, sender, conversation.getUnreadCountForUser(receiver));
         } catch (Exception e) {
             log.error("❌ Failed to update conversation for conversationId={}: {}", conversationId, e.getMessage(), e);
         }
+    }
+
+    public void hideConversation(String userEmail, String partnerEmail) {
+
+        String user = userEmail != null ?  userEmail.trim().toLowerCase() : "";
+        String partner = partnerEmail != null ?  partnerEmail.trim().toLowerCase() : "";
+
+        if(user.isEmpty() || partner.isEmpty() || user.equals(partner)) {
+            throw new IllegalArgumentException("Invalid conversation participants.");
+        }
+
+        String conversationId = Conversation.generateConversationId(user, partner);
+        Conversation conversation = conversationRepository.findById(conversationId).orElseThrow(() -> new IllegalArgumentException("Conversation not found."));
+
+        List<String> participants = conversation.getParticipants();
+        boolean isParticipant = participants != null 
+            && participants.stream().anyMatch(email -> 
+                email.equalsIgnoreCase(user)) 
+            && participants.stream().anyMatch(email ->
+                email.equalsIgnoreCase(partner));
+        
+        if(!isParticipant) {
+            throw  new IllegalArgumentException("User is not a participant in this conversation.");
+        }
+
+        conversation.setHiddenAtForUser(user, chatClock.nowInstant());
+        conversationRepository.save(conversation);
     }
 
     public List<ChatMessage> getChatHistory(String myEmail, String targetEmail) {
@@ -253,33 +283,54 @@ public class ChatService {
     }
 
     public List<ChatMessage> getConversations(String myEmail) {
-        String user = myEmail != null ? myEmail.trim().toLowerCase() : "";
-        List<Conversation> convs = conversationRepository.findByParticipantsContainingOrderByLastMessageAtDesc(user);
+    String user = myEmail != null ? myEmail.trim().toLowerCase() : "";
+    List<Conversation> convs =
+            conversationRepository.findByParticipantsContainingOrderByLastMessageAtDesc(user);
 
-        if (!convs.isEmpty()) {
-            List<ChatMessage> list = new ArrayList<>();
-            for (Conversation c : convs) {
-                ChatMessage msg = new ChatMessage();
-                msg.setConversationId(c.getId());
-                msg.setContent(c.getLastMessage());
-                msg.setSender(c.getLastMessageSender());
-                
-                String otherParticipant = (c.getParticipants() != null)
-                        ? c.getParticipants().stream()
-                            .filter(p -> !p.equalsIgnoreCase(user))
-                            .findFirst().orElse(c.getLastMessageSender())
-                        : c.getLastMessageSender();
-                msg.setReceiver(otherParticipant != null && otherParticipant.equalsIgnoreCase(c.getLastMessageSender()) ? user : otherParticipant);
-                msg.setTimestamp(c.getLastMessageAt());
-                msg.setStatus(c.getLastMessageStatus() != null ? c.getLastMessageStatus() : MessageStatus.SENT);
-                list.add(msg);
+    if (!convs.isEmpty()) {
+        List<ChatMessage> list = new ArrayList<>();
+
+        for (Conversation c : convs) {
+            // Skip chats hidden by this user.
+            if (c.getHiddenAtForUser(user) != null) {
+                continue;
             }
-            return list;
+
+            ChatMessage msg = new ChatMessage();
+            msg.setConversationId(c.getId());
+            msg.setContent(c.getLastMessage());
+            msg.setSender(c.getLastMessageSender());
+
+            String otherParticipant = c.getParticipants() != null
+                    ? c.getParticipants().stream()
+                            .filter(p -> p != null && !p.equalsIgnoreCase(user))
+                            .findFirst()
+                            .orElse(c.getLastMessageSender())
+                    : c.getLastMessageSender();
+
+            msg.setReceiver(
+                    otherParticipant != null
+                            && otherParticipant.equalsIgnoreCase(c.getLastMessageSender())
+                            ? user
+                            : otherParticipant);
+            msg.setTimestamp(c.getLastMessageAt());
+            msg.setStatus(c.getLastMessageStatus() != null
+                    ? c.getLastMessageStatus()
+                    : MessageStatus.SENT);
+
+            list.add(msg);
         }
 
-        // Fallback for historic data
-        List<ChatMessage> allMsgs = chatMessageRepository.findBySenderIgnoreCaseOrReceiverIgnoreCase(user, user);
-        allMsgs.sort(Comparator.comparing(ChatMessage::getTimestamp, Comparator.nullsFirst(Comparator.reverseOrder())));
+        return list;
+    }
+
+    // Keep your existing historic-data fallback below this point.
+    List<ChatMessage> allMsgs =
+                chatMessageRepository.findBySenderIgnoreCaseOrReceiverIgnoreCase(user, user);
+        allMsgs.sort(Comparator.comparing(
+                ChatMessage::getTimestamp,
+                Comparator.nullsFirst(Comparator.reverseOrder())));
+
         List<ChatMessage> result = new ArrayList<>();
         Set<String> processed = new HashSet<>();
 
@@ -287,14 +338,16 @@ public class ChatService {
             String s = msg.getSender() != null ? msg.getSender().trim().toLowerCase() : "";
             String r = msg.getReceiver() != null ? msg.getReceiver().trim().toLowerCase() : "";
             String other = s.equalsIgnoreCase(user) ? r : s;
+
             if (!other.isEmpty() && !processed.contains(other)) {
                 processed.add(other);
                 result.add(msg);
             }
         }
+
         return result;
     }
-
+    
     public Map<String, Integer> getUnreadCounts(String myEmail) {
         String user = myEmail != null ? myEmail.trim().toLowerCase() : "";
         List<ChatMessage> unreadMessages = chatMessageRepository.findByReceiverIgnoreCaseAndIsReadFalse(user);

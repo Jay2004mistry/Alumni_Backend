@@ -27,6 +27,8 @@ import com.alumni.management.chat.dto.TypingEvent;
 import com.alumni.management.chat.entity.ChatMessage;
 import com.alumni.management.chat.service.ChatService;
 
+import org.springframework.web.bind.annotation.DeleteMapping;
+
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController {
@@ -154,5 +156,24 @@ public class ChatController {
 		presence.put("online", isOnline);
 		presence.put("lastSeen", lastSeen != null ? lastSeen.toString() : null);
 		return ResponseEntity.ok(presence);
+	}
+
+	@DeleteMapping("/conversations/{partnerEmail}")
+	public ResponseEntity<Void> hideConversation(
+		Principal principal,
+		@PathVariable String partnerEmail
+	) {
+
+		String authEmail = getCurrentUserEmail(principal);
+		if (authEmail.isEmpty()){
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+		}
+
+		if (partnerEmail == null || partnerEmail.trim().isEmpty() || authEmail.equalsIgnoreCase(partnerEmail.trim())) {
+			return ResponseEntity.badRequest().build();
+		}
+
+		chatService.hideConversation(authEmail, partnerEmail);
+		return ResponseEntity.noContent().build();
 	}
 }
