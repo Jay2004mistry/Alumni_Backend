@@ -19,6 +19,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.alumni.management.event.entity.Event;
 import com.alumni.management.event.service.EventService;
+import com.alumni.management.event.dto.EventRegistrationResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
 
 @RestController
 @RequestMapping("api/events")
@@ -71,6 +74,25 @@ public class EventController {
 	@GetMapping("/my")
 	public List<Event> getMyEvents() {
 		return eventService.getMyEvents();
+	}
+
+	@PostMapping("/{eventId}/register")
+	@PreAuthorize("hasAnyRole('ALUMNI', 'FACULTY', 'STUDENT')")
+	@ResponseStatus(HttpStatus.CREATED)
+	public EventRegistrationResponse registerForEvent(@PathVariable Long eventId) {
+		return eventService.registerForEvent(eventId);
+	}
+
+	@GetMapping("/{eventId}/registration-status")
+	@PreAuthorize("hasAnyRole('STUDENT', 'ALUMNI', 'FACULTY', 'ADMIN')")
+	public boolean isUserRegisteredForEvent(@PathVariable Long eventId) {
+		return eventService.isUserRegisteredForEvent(eventId);
+	}
+
+	@GetMapping("/{eventId}/registrations")
+	@PreAuthorize("hasAnyRole('ALUMNI', 'FACULTY', 'ADMIN', 'STUDENT')")
+	public List<EventRegistrationResponse> getEventRegistration(@PathVariable Long eventId) {
+		return eventService.getEventRegistrations(eventId);
 	}
 
 //	Now only admin can access below 3

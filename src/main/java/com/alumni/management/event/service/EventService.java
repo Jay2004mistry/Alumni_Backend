@@ -20,6 +20,10 @@ import com.alumni.management.user.repository.UserRepository;
 import com.alumni.management.notification.entity.Notification;
 import com.alumni.management.notification.repository.NotificationRepository;
 
+import com.alumni.management.event.dto.EventRegistrationResponse;
+import com.alumni.management.event.entity.EventRegistration;
+import com.alumni.management.event.repository.EventRegistrationRepository;
+
 @Service
 public class EventService {
 
@@ -28,6 +32,9 @@ public class EventService {
 
 	@Autowired
 	UserRepository userRepository;
+
+	@Autowired
+	EventRegistrationRepository eventRegistrationRepository;	
 
 	@Autowired
 	NotificationRepository notificationRepository;
@@ -110,6 +117,93 @@ public class EventService {
 		userRepository.findById(user.getId()).orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
 		return eventRepository.findByCreatedBy_Id(user.getId());
+	}
+
+	public EventRegistrationResponse registerForEvent(Long eventId) {
+		User user = getCurrentUser();
+
+		Event event = eventRepository.findById(eventId).orElseThrow(() -> new ResourceNotFoundException("Event not found."));
+
+		if (event.getCreatedBy() !=  null
+			&& event.getCreatedBy().getId().equals(user.getId())) {
+				throw new RuntimeException("Organizers cannot register for their own event.");
+		}
+
+		if (!"APPROVED".equalsIgnoreCase(event.getStatus())) {
+			throw new RuntimeException("This event is not open for registration.");
+		}
+
+		if (event.getEventDate() != null && event.getEventDate().isBefore(LocalDate.now())) {
+			throw new RuntimeException("Rgistration for this event is closed.");
+		}
+
+		if (eventRegistrationRepository.existsByEvent_IdAndUser_Id(eventId, user.getId())) {
+			throw new RuntimeException("You are already registred for this event.");
+		}
+
+		EventRegistration registration = 
+			new EventRegistration(event, user, LocalDateTime.now());
+
+		EventRegistration saved = eventRegistrationRepository.save(registration);
+
+		return new EventRegistrationResponse(
+			saved.getId(),
+			user.getId(),
+			user.getRole() != null
+				? user.getRole().getRoleName()
+				:null,
+			user.getName(),
+			user.getEmail(),
+			user.getUniversityNumber(),
+			saved.getRegisteredAt()
+		);
+	}
+
+	public boolean isUserRegisteredForEvent(Long eventId) {
+
+		User user = getCurrentUser();
+
+		if(!eventRepository.existsById(eventId)) {
+			throw new ResourceNotFoundException("Event not found.");
+		}
+
+		return eventRegistrationRepository.existsByEvent_IdAndUser_Id(eventId, user.getId());
+
+	}
+
+	public List<EventRegistrationResponse> getEventRegistrations(Long eventId) {
+		User currentUser = getCurrentUser();
+
+		Event event = eventRepository.findById(eventId)
+			.orElseThrow(() -> new ResourceNotFoundException("Event not found."));
+
+		boolean isOwner = event.getCreatedBy() != null
+			&& event.getCreatedBy().getId().equals(currentUser.getId());
+
+		boolean isAdmin = currentUser.getRole() != null
+			&& "ADMIN".equalsIgnoreCase(currentUser.getRole().getRoleName());
+
+		if (!isOwner && !isAdmin) {
+			throw new RuntimeException("You are not authorized to view registrations for this event");
+		}
+
+		return eventRegistrationRepository
+			.findByEvent_IdOrderByRegisteredAtAsc(eventId)
+			.stream()
+			.map(registration -> new EventRegistrationResponse(
+				registration.getId(),
+				registration.getUser().getId(),
+				registration.getUser().getRole() != null
+					? registration.getUser().getRole().getRoleName()
+					: null,
+				registration.getUser().getName(),
+				registration.getUser().getEmail(),
+				registration.getUser().getUniversityNumber(),
+				registration.getRegisteredAt()
+			))
+			.toList();
+
+
 	}
 
 	public List<Event> getPendingEvents() {
