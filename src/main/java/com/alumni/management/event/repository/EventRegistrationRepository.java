@@ -17,4 +17,6 @@ public interface EventRegistrationRepository extends JpaRepository<EventRegistra
 
     void deleteByEvent_Id(Long eventId);
 
+    void deleteByUser_Id(Long userId);
+
 }

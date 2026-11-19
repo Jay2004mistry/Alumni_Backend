@@ -28,6 +28,7 @@ import com.alumni.management.role.repository.RoleRepository;
 import com.alumni.management.user.dto.UserResponseDto;
 import com.alumni.management.user.entity.User;
 import com.alumni.management.user.repository.UserRepository;
+import com.alumni.management.event.repository.EventRegistrationRepository;
 
 @Service
 public class AdminService {
@@ -61,6 +62,9 @@ public class AdminService {
 
 	@Autowired(required = false)
 	private com.alumni.management.verification.service.VerificationService verificationService;
+
+	@Autowired(required = false)
+	private EventRegistrationRepository eventRegistrationRepository;
 
 	private String getUserDepartment(User user) {
 		String role = user.getRole() != null ? user.getRole().getRoleName().toUpperCase() : "";
@@ -222,10 +226,15 @@ public class AdminService {
 			}
 		}
 
+		eventRegistrationRepository.deleteByUser_Id(userId);
+
 		// Clean up events created strictly by this user
 		if (eventRepository != null) {
 			List<Event> userEvents = eventRepository.findByCreatedBy_Id(userId);
 			if (userEvents != null && !userEvents.isEmpty()) {
+				for (Event event : userEvents) {
+					eventRegistrationRepository.deleteByEvent_Id(event.getId());
+				}
 				eventRepository.deleteAll(userEvents);
 			}
 		}
